@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments and secrets
+.env
+.venv/
+venv/
+env/
+
+# Local agent/editor metadata
+.agents/
+.vscode/
+.idea/
+
+# Vision datasets and generated artifacts
+datasets/
+raw_data/
+captures/
+weights/
+runs/
+logs/
+Log/
+rgbd_yolo_results/
+
+# Model and export binaries
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Large media and archives
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.zip
+*.rar
+*.7z
+
