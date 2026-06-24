@@ -148,7 +148,8 @@ def prepare_output_dir(out_dir: Path) -> None:
 def copy_split(samples: list[Sample], out_dir: Path, split: str) -> None:
     for sample in samples:
         shutil.copy2(sample.image_path, out_dir / "images" / split / sample.image_path.name)
-        shutil.copy2(sample.label_path, out_dir / "labels" / split / sample.label_path.name)
+        label_text = sample.label_path.read_text(encoding="utf-8-sig")
+        (out_dir / "labels" / split / sample.label_path.name).write_text(label_text, encoding="utf-8")
 
 
 def write_data_yaml(out_dir: Path) -> None:
@@ -185,4 +186,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
