@@ -97,6 +97,9 @@ ARG_SPECS = {
     },
     "no_window": {"flags": ["--no-window"], "action": "store_true", "default": False},
     "display_backend": {"flags": ["--display-backend"], "choices": ["auto", "opencv", "tkinter"], "default": "auto"},
+    "window_width": {"flags": ["--window-width"], "type": int, "default": 1280},
+    "window_height": {"flags": ["--window-height"], "type": int, "default": 720},
+    "resize_to_window": {"flags": ["--resize-to-window"], "type": str_to_bool, "default": True},
     "print_detections": {"flags": ["--print-detections"], "action": "store_true", "default": False},
 }
 
@@ -677,7 +680,7 @@ class OpenCvDisplay:
 
 
 class TkinterDisplay:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, width: int, height: int, resize_to_window: bool) -> None:
         try:
             import tkinter as tk
             from PIL import Image, ImageTk
@@ -691,9 +694,11 @@ class TkinterDisplay:
         self.image_tk_module = ImageTk
         self.root = tk.Tk()
         self.root.title(title)
+        self.root.geometry(f"{width}x{height}")
+        self.resize_to_window = resize_to_window
         self.root.protocol("WM_DELETE_WINDOW", self._request_quit)
         self.root.bind("<Key>", self._on_key)
-        self.label = tk.Label(self.root)
+        self.label = tk.Label(self.root, bg="black")
         self.label.pack(fill=tk.BOTH, expand=True)
         self.photo = None
         self.pending_action: str | None = None
@@ -711,6 +716,16 @@ class TkinterDisplay:
     def update(self, image) -> str | None:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pil_image = self.image_module.fromarray(rgb)
+        if self.resize_to_window:
+            target_width = max(1, self.label.winfo_width())
+            target_height = max(1, self.label.winfo_height())
+            source_width, source_height = pil_image.size
+            scale = min(target_width / source_width, target_height / source_height)
+            resized_size = (
+                max(1, int(source_width * scale)),
+                max(1, int(source_height * scale)),
+            )
+            pil_image = pil_image.resize(resized_size, self.image_module.Resampling.BILINEAR)
         self.photo = self.image_tk_module.PhotoImage(image=pil_image)
         self.label.configure(image=self.photo)
         self.root.update_idletasks()
@@ -726,18 +741,19 @@ class TkinterDisplay:
             pass
 
 
-def create_display(backend: str):
+def create_display(args: argparse.Namespace):
     title = "YOLO Camera Detect"
+    backend = args.display_backend
     if backend == "opencv":
         return OpenCvDisplay(title)
     if backend == "tkinter":
-        return TkinterDisplay(title)
+        return TkinterDisplay(title, args.window_width, args.window_height, args.resize_to_window)
 
     try:
         return OpenCvDisplay(title)
     except cv2.error:
         print("[WARN] OpenCV window is unavailable, falling back to Tkinter display.")
-        return TkinterDisplay(title)
+        return TkinterDisplay(title, args.window_width, args.window_height, args.resize_to_window)
 
 
 def main() -> None:
@@ -781,7 +797,7 @@ def main() -> None:
     try:
         if not args.no_window:
             try:
-                display = create_display(args.display_backend)
+                display = create_display(args)
             except (RuntimeError, cv2.error) as exc:
                 print(f"[ERROR] Display window is unavailable: {exc}")
                 print("[HINT] Use --no-window --save-video to run without GUI display.")
