@@ -10,6 +10,7 @@ Use an RTSP/HTTP stream:
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
 import time
 from datetime import datetime
@@ -24,6 +25,12 @@ DEFAULT_MODEL = Path(
 CLASS_NAMES = {
     0: "cover_edge_hole",
     1: "base_edge_hole",
+}
+BACKENDS = {
+    "any": cv2.CAP_ANY,
+    "dshow": cv2.CAP_DSHOW,
+    "msmf": cv2.CAP_MSMF,
+    "obsensor": getattr(cv2, "CAP_OBSENSOR", cv2.CAP_ANY),
 }
 
 
@@ -48,6 +55,23 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Camera stream URL, for example RTSP/HTTP. Overrides --camera-index.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["auto", *BACKENDS.keys()],
+        default="auto",
+        help="OpenCV capture backend for local cameras. Windows auto uses dshow. Default: auto.",
+    )
+    parser.add_argument(
+        "--read-retries",
+        type=int,
+        default=30,
+        help="Frame read retries before giving up. Default: 30.",
+    )
+    parser.add_argument(
+        "--list-cameras",
+        action="store_true",
+        help="Scan local camera indexes and exit without loading the model.",
     )
     parser.add_argument(
         "--imgsz",
@@ -127,9 +151,38 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_backend(name: str, is_url: bool) -> int:
+    if is_url:
+        return cv2.CAP_ANY if name == "auto" else BACKENDS[name]
+    if name == "auto":
+        return cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY
+    return BACKENDS[name]
+
+
+def backend_name(api: int) -> str:
+    for name, value in BACKENDS.items():
+        if value == api:
+            return name
+    return str(api)
+
+
+def read_frame_with_retries(
+    capture: cv2.VideoCapture,
+    retries: int,
+    delay_seconds: float = 0.1,
+) -> tuple[bool, object | None]:
+    for _ in range(max(1, retries)):
+        ok, frame = capture.read()
+        if ok and frame is not None:
+            return True, frame
+        time.sleep(delay_seconds)
+    return False, None
+
+
 def open_capture(args: argparse.Namespace) -> cv2.VideoCapture:
     source: str | int = args.camera_url if args.camera_url else args.camera_index
-    capture = cv2.VideoCapture(source)
+    api = resolve_backend(args.backend, is_url=bool(args.camera_url))
+    capture = cv2.VideoCapture(source, api)
 
     if not args.camera_url:
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
@@ -140,6 +193,15 @@ def open_capture(args: argparse.Namespace) -> cv2.VideoCapture:
         raise SystemExit(
             f"[ERROR] Cannot open camera source: {source}. "
             "Check camera index, stream URL, permissions, and whether another app is using it."
+        )
+
+    ok, _ = read_frame_with_retries(capture, args.read_retries)
+    if not ok:
+        capture.release()
+        raise SystemExit(
+            f"[ERROR] Camera opened but no frame was received: {source}, backend={backend_name(api)}.\n"
+            "[HINT] Try another index: python tools/camera_detect.py --list-cameras\n"
+            "[HINT] Or try: --backend msmf / --backend any / --camera-index 1"
         )
 
     return capture
@@ -155,6 +217,39 @@ def load_model(model_path: Path):
         ) from exc
 
     return YOLO(str(model_path))
+
+
+def list_cameras(max_index: int = 10) -> None:
+    print("[INFO] Scanning local camera indexes...")
+    candidates = ["dshow", "msmf", "any"] if platform.system() == "Windows" else ["any"]
+    found = False
+
+    for index in range(max_index):
+        for backend in candidates:
+            api = BACKENDS[backend]
+            capture = cv2.VideoCapture(index, api)
+            if not capture.isOpened():
+                capture.release()
+                continue
+
+            ok, frame = read_frame_with_retries(capture, retries=5, delay_seconds=0.05)
+            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = capture.get(cv2.CAP_PROP_FPS)
+            capture.release()
+
+            if ok and frame is not None:
+                actual_height, actual_width = frame.shape[:2]
+                print(
+                    f"[OK] index={index}, backend={backend}, "
+                    f"frame={actual_width}x{actual_height}, requested={width}x{height}, fps={fps:.1f}"
+                )
+                found = True
+            else:
+                print(f"[WARN] index={index}, backend={backend}, opened but no frame")
+
+    if not found:
+        print("[WARN] No readable local camera was found.")
 
 
 def create_writer(path: Path, fps: float, frame_size: tuple[int, int]) -> cv2.VideoWriter:
@@ -227,6 +322,11 @@ def save_snapshot(snapshot_dir: Path, image) -> Path:
 
 def main() -> None:
     args = parse_args()
+
+    if args.list_cameras:
+        list_cameras()
+        return
+
     model_path = args.model.resolve()
 
     if not model_path.is_file():
@@ -242,6 +342,7 @@ def main() -> None:
 
     print(f"[OK] Model: {model_path}")
     print(f"[OK] Camera: {args.camera_url if args.camera_url else args.camera_index}")
+    print(f"[OK] Backend: {backend_name(resolve_backend(args.backend, is_url=bool(args.camera_url)))}")
     print("[OK] Press q or Esc to quit. Press s to save a snapshot.")
 
     try:

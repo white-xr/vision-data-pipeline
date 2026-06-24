@@ -207,6 +207,20 @@ runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
 python tools/camera_detect.py --camera-index 0
 ```
 
+如果打开相机后提示读不到画面，先扫描可用相机编号：
+
+```bash
+python tools/camera_detect.py --list-cameras
+```
+
+Windows 上本机相机默认使用 DirectShow 后端。如果 `0` 号相机不可用，可以换编号或后端：
+
+```bash
+python tools/camera_detect.py --camera-index 1 --backend dshow
+python tools/camera_detect.py --camera-index 0 --backend msmf
+python tools/camera_detect.py --camera-index 0 --backend any
+```
+
 指定模型、置信度和推理尺寸：
 
 ```bash
