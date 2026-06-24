@@ -34,6 +34,19 @@ BACKENDS = {
     "msmf": cv2.CAP_MSMF,
     "obsensor": getattr(cv2, "CAP_OBSENSOR", cv2.CAP_ANY),
 }
+
+
+def str_to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value!r}")
+
+
 ARG_SPECS = {
     "model": {"flags": ["--model"], "type": Path, "default": DEFAULT_MODEL},
     "camera_index": {"flags": ["--camera-index"], "type": int, "default": 0},
@@ -41,6 +54,9 @@ ARG_SPECS = {
     "camera_url": {"flags": ["--camera-url"], "type": str, "default": None},
     "backend": {"flags": ["--backend"], "choices": ["auto", *BACKENDS.keys()], "default": "auto"},
     "read_retries": {"flags": ["--read-retries"], "type": int, "default": 30},
+    "opencv_auto_exposure": {"flags": ["--opencv-auto-exposure"], "type": str_to_bool, "default": None},
+    "opencv_exposure": {"flags": ["--opencv-exposure"], "type": float, "default": None},
+    "opencv_gain": {"flags": ["--opencv-gain"], "type": float, "default": None},
     "list_cameras": {"flags": ["--list-cameras"], "action": "store_true", "default": False},
     "preview_only": {"flags": ["--preview-only"], "action": "store_true", "default": False},
     "print_frame_stats": {"flags": ["--print-frame-stats"], "action": "store_true", "default": False},
@@ -60,6 +76,17 @@ ARG_SPECS = {
     "orbbec_depth_align": {"flags": ["--orbbec-depth-align"], "choices": ["sw", "hw", "disable"], "default": "sw"},
     "disable_depth": {"flags": ["--disable-depth"], "action": "store_true", "default": False},
     "orbbec_timeout_ms": {"flags": ["--orbbec-timeout-ms"], "type": int, "default": 1000},
+    "orbbec_color_auto_exposure": {"flags": ["--orbbec-color-auto-exposure"], "type": str_to_bool, "default": None},
+    "orbbec_color_exposure": {"flags": ["--orbbec-color-exposure"], "type": int, "default": None},
+    "orbbec_color_gain": {"flags": ["--orbbec-color-gain"], "type": int, "default": None},
+    "orbbec_color_ae_max_exposure": {"flags": ["--orbbec-color-ae-max-exposure"], "type": int, "default": None},
+    "orbbec_color_ae_max_gain": {"flags": ["--orbbec-color-ae-max-gain"], "type": int, "default": None},
+    "orbbec_depth_auto_exposure": {"flags": ["--orbbec-depth-auto-exposure"], "type": str_to_bool, "default": None},
+    "orbbec_depth_exposure": {"flags": ["--orbbec-depth-exposure"], "type": int, "default": None},
+    "orbbec_depth_gain": {"flags": ["--orbbec-depth-gain"], "type": int, "default": None},
+    "orbbec_ir_auto_exposure": {"flags": ["--orbbec-ir-auto-exposure"], "type": str_to_bool, "default": None},
+    "orbbec_ir_exposure": {"flags": ["--orbbec-ir-exposure"], "type": int, "default": None},
+    "orbbec_ir_gain": {"flags": ["--orbbec-ir-gain"], "type": int, "default": None},
     "max_det": {"flags": ["--max-det"], "type": int, "default": 100},
     "line_width": {"flags": ["--line-width"], "type": int, "default": 2},
     "save_video": {"flags": ["--save-video"], "type": Path, "default": None},
@@ -191,6 +218,26 @@ def read_frame_with_retries(
     return False, None
 
 
+def maybe_set_opencv_property(capture: cv2.VideoCapture, prop: int, value, name: str) -> None:
+    if value is None:
+        return
+    ok = capture.set(prop, value)
+    actual = capture.get(prop)
+    if ok:
+        print(f"[OK] OpenCV {name}: requested={value}, actual={actual}")
+    else:
+        print(f"[WARN] OpenCV {name} is not supported by this camera/backend.")
+
+
+def apply_opencv_camera_controls(capture: cv2.VideoCapture, args: argparse.Namespace) -> None:
+    if args.opencv_auto_exposure is not None:
+        # DirectShow commonly uses 0.75 for auto and 0.25 for manual exposure.
+        auto_value = 0.75 if args.opencv_auto_exposure else 0.25
+        maybe_set_opencv_property(capture, cv2.CAP_PROP_AUTO_EXPOSURE, auto_value, "auto_exposure")
+    maybe_set_opencv_property(capture, cv2.CAP_PROP_EXPOSURE, args.opencv_exposure, "exposure")
+    maybe_set_opencv_property(capture, cv2.CAP_PROP_GAIN, args.opencv_gain, "gain")
+
+
 def open_capture(args: argparse.Namespace) -> cv2.VideoCapture:
     source: str | int = args.camera_url if args.camera_url else args.camera_index
     api = resolve_backend(args.backend, is_url=bool(args.camera_url))
@@ -200,6 +247,7 @@ def open_capture(args: argparse.Namespace) -> cv2.VideoCapture:
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
         capture.set(cv2.CAP_PROP_FPS, args.fps)
+        apply_opencv_camera_controls(capture, args)
 
     if not capture.isOpened():
         raise SystemExit(
@@ -275,6 +323,79 @@ def orbbec_depth_frame_to_mm(depth_frame):
     return data.reshape((height, width)).astype("float32") * float(scale)
 
 
+def orbbec_property_supported(device, property_id, permission_name: str = "write") -> bool:
+    try:
+        supported = device.is_property_supported(property_id, permission_name)
+        return bool(supported)
+    except TypeError:
+        try:
+            return bool(device.is_property_supported(property_id))
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
+def set_orbbec_bool_property(device, ob_property_id, name: str, value) -> None:
+    if value is None:
+        return
+    property_id = getattr(ob_property_id, name)
+    try:
+        device.set_bool_property(property_id, bool(value))
+        actual = device.get_bool_property(property_id)
+        print(f"[OK] Orbbec {name}: requested={bool(value)}, actual={actual}")
+    except Exception as exc:
+        print(f"[WARN] Orbbec {name} is not supported or failed to set: {exc}")
+
+
+def set_orbbec_int_property(device, ob_property_id, name: str, value) -> None:
+    if value is None:
+        return
+    property_id = getattr(ob_property_id, name)
+    try:
+        device.set_int_property(property_id, int(value))
+        actual = device.get_int_property(property_id)
+        print(f"[OK] Orbbec {name}: requested={int(value)}, actual={actual}")
+    except Exception as exc:
+        print(f"[WARN] Orbbec {name} is not supported or failed to set: {exc}")
+
+
+def apply_orbbec_camera_controls(device, ob_property_id, args: argparse.Namespace) -> None:
+    set_orbbec_bool_property(
+        device,
+        ob_property_id,
+        "OB_PROP_COLOR_AUTO_EXPOSURE_BOOL",
+        args.orbbec_color_auto_exposure,
+    )
+    set_orbbec_int_property(
+        device,
+        ob_property_id,
+        "OB_PROP_COLOR_AE_MAX_EXPOSURE_INT",
+        args.orbbec_color_ae_max_exposure,
+    )
+    set_orbbec_int_property(
+        device,
+        ob_property_id,
+        "OB_PROP_COLOR_AE_MAX_GAIN_INT",
+        args.orbbec_color_ae_max_gain,
+    )
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_COLOR_EXPOSURE_INT", args.orbbec_color_exposure)
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_COLOR_GAIN_INT", args.orbbec_color_gain)
+
+    set_orbbec_bool_property(
+        device,
+        ob_property_id,
+        "OB_PROP_DEPTH_AUTO_EXPOSURE_BOOL",
+        args.orbbec_depth_auto_exposure,
+    )
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_DEPTH_EXPOSURE_INT", args.orbbec_depth_exposure)
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_DEPTH_GAIN_INT", args.orbbec_depth_gain)
+
+    set_orbbec_bool_property(device, ob_property_id, "OB_PROP_IR_AUTO_EXPOSURE_BOOL", args.orbbec_ir_auto_exposure)
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_IR_EXPOSURE_INT", args.orbbec_ir_exposure)
+    set_orbbec_int_property(device, ob_property_id, "OB_PROP_IR_GAIN_INT", args.orbbec_ir_gain)
+
+
 class OrbbecColorCapture:
     def __init__(self, args: argparse.Namespace) -> None:
         add_orbbec_dll_dirs(args.orbbec_sdk_dir)
@@ -285,6 +406,7 @@ class OrbbecColorCapture:
                 OBError,
                 OBFormat,
                 OBFrameAggregateOutputMode,
+                OBPropertyID,
                 OBSensorType,
                 Pipeline,
             )
@@ -301,6 +423,7 @@ class OrbbecColorCapture:
         self.last_depth_image = None
         self.depth_aligned_to_color = False
         config = Config()
+        apply_orbbec_camera_controls(self.pipeline.get_device(), OBPropertyID, args)
 
         profile_list = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
         color_profile = None

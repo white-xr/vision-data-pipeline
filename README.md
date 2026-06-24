@@ -214,6 +214,7 @@ python tools/camera_detect.py
 ```
 
 常用参数都写在 `configs/camera_detect.yaml` 中，包括模型路径、相机类型、Orbbec SDK 路径、深度对齐方式、置信度、推理尺寸、显示窗口和调试开关。日常使用只需要修改这份配置文件。
+曝光、增益、自动曝光上限等相机控制参数也在这份配置里，默认 `null` 表示不修改相机当前设置。
 
 当前默认配置使用奥比中光 RGB-D 相机、Tkinter 显示窗口、软件 depth-to-color 对齐，并显示检测中心的深度 `Z`。奥比中光相机不要用普通 OpenCV 编号读取，否则可能拿到深度、红外或空流。
 
