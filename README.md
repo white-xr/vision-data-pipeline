@@ -74,7 +74,7 @@ python tools/export_annotation_candidates.py \
   --include-tags to_annotate hard
 ```
 
-## LabelImg 检测框标注
+## AnyLabeling 检测框标注
 
 当前工业视觉孔位检测任务只做目标检测，不做分割。只标边缘安装孔，不标内部孔。完整标注规则见 [docs/labeling_rules.md](docs/labeling_rules.md)。
 
@@ -91,10 +91,10 @@ cover_edge_hole
 base_edge_hole
 ```
 
-从 `data/raw/` 准备 LabelImg 标注目录：
+从 `data/raw/` 准备 AnyLabeling 标注目录：
 
 ```bash
-python tools/prepare_labelimg_dataset.py --raw-dir data/raw --out-dir data/annotation/hole_detect_v1
+python tools/prepare_anylabeling_dataset.py --raw-dir data/raw --out-dir data/annotation/hole_detect_v1
 ```
 
 该命令只复制原图，不会删除、移动、重命名 `data/raw/` 中的原始图片。复制后的图片会带上 batch 名，例如：
@@ -104,24 +104,25 @@ data/raw/base_01/000001.png
 data/annotation/hole_detect_v1/images/base_01_000001.png
 ```
 
-启动 LabelImg：
+启动 AnyLabeling：
 
 ```bash
-labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+anylabeling
 ```
 
-或者：
+如果命令不可用，可以尝试：
 
 ```bash
-python -m labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+python -m anylabeling.app
 ```
 
-打开 LabelImg 后：
+打开 AnyLabeling 后：
 
-1. 点击 `Change Save Dir`
-2. 保存目录设为 `data/annotation/hole_detect_v1/labels/`
-3. 标注格式选择 `YOLO`
-4. 每个边缘安装孔一个框，只标边缘孔，内部孔不标
+1. 打开 `data/annotation/hole_detect_v1/images/`
+2. 使用矩形框标注边缘安装孔
+3. 类别只使用 `cover_edge_hole` 和 `base_edge_hole`
+4. 导出 YOLO Detect 格式，类别顺序必须与 `configs/classes.txt` 一致
+5. 标签保存到 `data/annotation/hole_detect_v1/labels/`
 
 训练前必须检查：
 
@@ -137,7 +138,7 @@ FiftyOne 人工筛选
 ↓
 导出或准备 annotation/images
 ↓
-LabelImg 标注边缘安装孔
+AnyLabeling 标注边缘安装孔
 ↓
 导出 YOLO Detect 数据集
 ↓

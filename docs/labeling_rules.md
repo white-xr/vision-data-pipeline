@@ -1,4 +1,4 @@
-# LabelImg 孔位检测标注规则
+# AnyLabeling 孔位检测标注规则
 
 ## 标注目标
 
@@ -56,46 +56,47 @@ base_edge_hole
 - 孔看不清或不确定中心：不要标，后续不要进入训练集。
 - 有孔但没有标注的图片不能进入训练集。
 
-## LabelImg 使用流程
+## AnyLabeling 使用流程
 
 安装：
 
 ```bash
-pip install labelImg
+pip install anylabeling "imgviz<2"
 ```
 
 启动：
 
 ```bash
-labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+anylabeling
 ```
 
-或者：
+如果命令不可用，可以尝试：
 
 ```bash
-python -m labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+python -m anylabeling.app
 ```
 
-打开 LabelImg 后：
+打开 AnyLabeling 后：
 
-1. 点击 `Change Save Dir`
-2. 保存目录设为：
+1. 打开图片目录：
 
 ```text
-data/annotation/hole_detect_v1/labels/
+data/annotation/hole_detect_v1/images/
 ```
 
-3. 标注格式选择：
-
-```text
-YOLO
-```
-
-4. 类别只使用：
+2. 创建或导入类别，只使用：
 
 ```text
 cover_edge_hole
 base_edge_hole
+```
+
+3. 使用矩形框标注，每个边缘安装孔一个框。
+4. 导出 YOLO Detect 格式，类别顺序必须与 [configs/classes.txt](../configs/classes.txt) 一致。
+5. 标签保存到：
+
+```text
+data/annotation/hole_detect_v1/labels/
 ```
 
 标注规则：每个边缘安装孔一个框，只标边缘孔，内部孔不标。

@@ -1,7 +1,7 @@
-"""Copy raw images into a LabelImg annotation workspace.
+"""Copy raw images into an AnyLabeling annotation workspace.
 
 Example:
-    python tools/prepare_labelimg_dataset.py \
+    python tools/prepare_anylabeling_dataset.py \
         --raw-dir data/raw \
         --out-dir data/annotation/hole_detect_v1
 """
@@ -20,7 +20,7 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prepare images from data/raw for LabelImg YOLO detection annotation."
+        description="Prepare images from data/raw for AnyLabeling YOLO detection annotation."
     )
     parser.add_argument(
         "--raw-dir",
@@ -76,7 +76,7 @@ def unique_output_path(images_dir: Path, batch_name: str, filename: str) -> Path
     return candidate
 
 
-def prepare_labelimg_dataset(raw_dir: Path, out_dir: Path) -> int:
+def prepare_anylabeling_dataset(raw_dir: Path, out_dir: Path) -> int:
     raw_dir = raw_dir.resolve()
     out_dir = out_dir.resolve()
     images_dir = out_dir / "images"
@@ -116,7 +116,7 @@ def prepare_labelimg_dataset(raw_dir: Path, out_dir: Path) -> int:
 
 def main() -> None:
     args = parse_args()
-    prepare_labelimg_dataset(args.raw_dir, args.out_dir)
+    prepare_anylabeling_dataset(args.raw_dir, args.out_dir)
 
 
 if __name__ == "__main__":

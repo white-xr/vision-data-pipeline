@@ -9,5 +9,6 @@ dependencies:
   - numpy
   - pip:
       - fiftyone
-      - labelImg
+      - anylabeling
+      - imgviz<2
       - opencv-python
