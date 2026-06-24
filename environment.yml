@@ -1,0 +1,13 @@
+name: vision-data
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pandas
+  - numpy
+  - pip:
+      - fiftyone
+      - opencv-python
+

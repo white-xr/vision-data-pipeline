@@ -1,3 +1,4 @@
 fiftyone
+opencv-python
 pandas
-
+numpy

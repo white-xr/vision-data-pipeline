@@ -10,6 +10,24 @@
 
 完整数据流转规范见 [docs/dataset_structure.md](docs/dataset_structure.md)。
 
+## 环境安装
+
+推荐使用 Conda 管理项目环境。后续所有脚本默认在 `vision-data` 环境中运行。
+
+创建环境：
+
+```bash
+conda env create -f environment.yml
+```
+
+激活环境：
+
+```bash
+conda activate vision-data
+```
+
+运行工具前请先激活环境。更多环境创建、更新和验证命令见 [docs/environment_setup.md](docs/environment_setup.md)。
+
 ## 数据目录
 
 ```text
@@ -26,12 +44,6 @@ data/
 ## FiftyOne 人工筛选
 
 FiftyOne 用于快速浏览 `data/raw/` 下的原始图片，并通过人工打 tag 的方式筛选适合标注的图片。当前默认处理单目 Left 图，不处理 `left/right` 双目结构。
-
-安装依赖：
-
-```bash
-pip install -r requirements.txt
-```
 
 启动浏览：
 
