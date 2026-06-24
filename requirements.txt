@@ -3,5 +3,6 @@ anylabeling
 imgviz<2
 ultralytics
 opencv-python
+pillow
 pandas
 numpy

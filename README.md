@@ -207,6 +207,12 @@ runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
 python tools/camera_detect.py --camera-index 0
 ```
 
+当前环境如果安装的是 `opencv-python-headless`，请使用 Tkinter 窗口显示：
+
+```bash
+python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend tkinter
+```
+
 如果打开相机后提示读不到画面，先扫描可用相机编号：
 
 ```bash

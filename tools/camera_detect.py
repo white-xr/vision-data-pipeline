@@ -144,6 +144,12 @@ def parse_args() -> argparse.Namespace:
         help="Do not open a display window. Useful for headless OpenCV environments.",
     )
     parser.add_argument(
+        "--display-backend",
+        choices=["auto", "opencv", "tkinter"],
+        default="auto",
+        help="Display backend for the live window. Default: auto.",
+    )
+    parser.add_argument(
         "--print-detections",
         action="store_true",
         help="Print detected class, confidence, and center pixel for each frame.",
@@ -320,6 +326,88 @@ def save_snapshot(snapshot_dir: Path, image) -> Path:
     return path
 
 
+class OpenCvDisplay:
+    def __init__(self, title: str) -> None:
+        self.title = title
+        cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
+
+    def update(self, image) -> str | None:
+        cv2.imshow(self.title, image)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord("q"), 27):
+            return "quit"
+        if key == ord("s"):
+            return "snapshot"
+        return None
+
+    def close(self) -> None:
+        cv2.destroyWindow(self.title)
+
+
+class TkinterDisplay:
+    def __init__(self, title: str) -> None:
+        try:
+            import tkinter as tk
+            from PIL import Image, ImageTk
+        except ImportError as exc:
+            raise RuntimeError(
+                "Tkinter display requires tkinter and pillow. Install pillow or use --no-window."
+            ) from exc
+
+        self.tk = tk
+        self.image_module = Image
+        self.image_tk_module = ImageTk
+        self.root = tk.Tk()
+        self.root.title(title)
+        self.root.protocol("WM_DELETE_WINDOW", self._request_quit)
+        self.root.bind("<Key>", self._on_key)
+        self.label = tk.Label(self.root)
+        self.label.pack(fill=tk.BOTH, expand=True)
+        self.photo = None
+        self.pending_action: str | None = None
+
+    def _request_quit(self) -> None:
+        self.pending_action = "quit"
+
+    def _on_key(self, event) -> None:
+        key = event.keysym.lower()
+        if key in {"q", "escape"}:
+            self.pending_action = "quit"
+        elif key == "s":
+            self.pending_action = "snapshot"
+
+    def update(self, image) -> str | None:
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        pil_image = self.image_module.fromarray(rgb)
+        self.photo = self.image_tk_module.PhotoImage(image=pil_image)
+        self.label.configure(image=self.photo)
+        self.root.update_idletasks()
+        self.root.update()
+        action = self.pending_action
+        self.pending_action = None
+        return action
+
+    def close(self) -> None:
+        try:
+            self.root.destroy()
+        except self.tk.TclError:
+            pass
+
+
+def create_display(backend: str):
+    title = "YOLO Camera Detect"
+    if backend == "opencv":
+        return OpenCvDisplay(title)
+    if backend == "tkinter":
+        return TkinterDisplay(title)
+
+    try:
+        return OpenCvDisplay(title)
+    except cv2.error:
+        print("[WARN] OpenCV window is unavailable, falling back to Tkinter display.")
+        return TkinterDisplay(title)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -336,7 +424,7 @@ def main() -> None:
     capture = open_capture(args)
 
     writer: cv2.VideoWriter | None = None
-    window_ready = False
+    display = None
     frame_id = 0
     started_at = time.time()
 
@@ -346,6 +434,14 @@ def main() -> None:
     print("[OK] Press q or Esc to quit. Press s to save a snapshot.")
 
     try:
+        if not args.no_window:
+            try:
+                display = create_display(args.display_backend)
+            except (RuntimeError, cv2.error) as exc:
+                print(f"[ERROR] Display window is unavailable: {exc}")
+                print("[HINT] Use --no-window --save-video to run without GUI display.")
+                return
+
         while True:
             ok, frame = capture.read()
             if not ok or frame is None:
@@ -389,21 +485,16 @@ def main() -> None:
                     writer = create_writer(args.save_video, fps, (width, height))
                 writer.write(annotated)
 
-            if not args.no_window:
+            if display is not None:
                 try:
-                    if not window_ready:
-                        cv2.namedWindow("YOLO Camera Detect", cv2.WINDOW_NORMAL)
-                        window_ready = True
-                    cv2.imshow("YOLO Camera Detect", annotated)
-                    key = cv2.waitKey(1) & 0xFF
-                except cv2.error as exc:
-                    print(f"[ERROR] OpenCV window is unavailable: {exc}")
-                    print("[HINT] Use --no-window --save-video to run without GUI display.")
+                    action = display.update(annotated)
+                except RuntimeError as exc:
+                    print(f"[ERROR] Display window closed or unavailable: {exc}")
                     break
 
-                if key in (ord("q"), 27):
+                if action == "quit":
                     break
-                if key == ord("s"):
+                if action == "snapshot":
                     path = save_snapshot(args.snapshot_dir, annotated)
                     print(f"[OK] Snapshot saved: {path}")
 
@@ -411,8 +502,8 @@ def main() -> None:
         capture.release()
         if writer is not None:
             writer.release()
-        if window_ready:
-            cv2.destroyAllWindows()
+        if display is not None:
+            display.close()
 
 
 if __name__ == "__main__":
