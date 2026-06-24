@@ -144,6 +144,17 @@ def parse_args() -> argparse.Namespace:
         help="Requested Orbbec color stream format. Default: RGB.",
     )
     parser.add_argument(
+        "--orbbec-depth-align",
+        choices=["sw", "hw", "disable"],
+        default="sw",
+        help="Depth-to-color alignment mode for Orbbec RGB-D. Default: sw.",
+    )
+    parser.add_argument(
+        "--disable-depth",
+        action="store_true",
+        help="Disable Orbbec depth stream and show 2D pixel centers only.",
+    )
+    parser.add_argument(
         "--orbbec-timeout-ms",
         type=int,
         default=1000,
@@ -294,11 +305,29 @@ def orbbec_frame_to_bgr(frame, ob_format) -> object | None:
     return None
 
 
+def orbbec_depth_frame_to_mm(depth_frame):
+    import numpy as np
+
+    width = depth_frame.get_width()
+    height = depth_frame.get_height()
+    scale = depth_frame.get_depth_scale()
+    data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16, count=width * height)
+    return data.reshape((height, width)).astype("float32") * float(scale)
+
+
 class OrbbecColorCapture:
     def __init__(self, args: argparse.Namespace) -> None:
         add_orbbec_dll_dirs(args.orbbec_sdk_dir)
         try:
-            from pyorbbecsdk import Config, OBError, OBFormat, OBSensorType, Pipeline
+            from pyorbbecsdk import (
+                Config,
+                OBAlignMode,
+                OBError,
+                OBFormat,
+                OBFrameAggregateOutputMode,
+                OBSensorType,
+                Pipeline,
+            )
         except ImportError as exc:
             raise SystemExit(
                 "[ERROR] Missing Orbbec Python wrapper.\n"
@@ -308,6 +337,9 @@ class OrbbecColorCapture:
 
         self.ob_format = OBFormat
         self.pipeline = Pipeline()
+        self.enable_depth = not args.disable_depth
+        self.last_depth_image = None
+        self.depth_aligned_to_color = False
         config = Config()
 
         profile_list = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
@@ -329,6 +361,37 @@ class OrbbecColorCapture:
 
         print(f"[OK] Orbbec color profile: {color_profile}")
         config.enable_stream(color_profile)
+
+        if self.enable_depth:
+            depth_profile = None
+            try:
+                depth_profiles = self.pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
+                depth_profile = depth_profiles.get_default_video_stream_profile()
+                print(f"[OK] Orbbec depth profile: {depth_profile}")
+                config.enable_stream(depth_profile)
+                config.set_frame_aggregate_output_mode(OBFrameAggregateOutputMode.FULL_FRAME_REQUIRE)
+
+                if args.orbbec_depth_align == "hw":
+                    config.set_align_mode(OBAlignMode.HW_MODE)
+                    self.depth_aligned_to_color = True
+                    print("[OK] Orbbec depth align: hardware depth-to-color")
+                elif args.orbbec_depth_align == "sw":
+                    config.set_align_mode(OBAlignMode.SW_MODE)
+                    self.depth_aligned_to_color = True
+                    print("[OK] Orbbec depth align: software depth-to-color")
+                else:
+                    config.set_align_mode(OBAlignMode.DISABLE)
+                    print("[WARN] Orbbec depth align disabled. Z lookup may not match RGB pixels.")
+            except Exception as exc:
+                self.enable_depth = False
+                print(f"[WARN] Orbbec depth stream is unavailable, running RGB only: {exc}")
+
+        if self.enable_depth:
+            try:
+                self.pipeline.enable_frame_sync()
+            except Exception as exc:
+                print(f"[WARN] Orbbec frame sync could not be enabled: {exc}")
+
         self.pipeline.start(config)
         self.timeout_ms = args.orbbec_timeout_ms
         self.fps = args.fps
@@ -343,6 +406,12 @@ class OrbbecColorCapture:
             return False, None
 
         image = orbbec_frame_to_bgr(color_frame, self.ob_format)
+        self.last_depth_image = None
+        if self.enable_depth:
+            depth_frame = frames.get_depth_frame()
+            if depth_frame is not None:
+                self.last_depth_image = orbbec_depth_frame_to_mm(depth_frame)
+
         return (image is not None), image
 
     def get(self, prop: int) -> float:
@@ -410,7 +479,35 @@ def create_writer(path: Path, fps: float, frame_size: tuple[int, int]) -> cv2.Vi
     return writer
 
 
-def draw_detection_centers(result, image) -> list[dict[str, object]]:
+def lookup_depth_mm(depth_image, center_x: int, center_y: int) -> float | None:
+    if depth_image is None:
+        return None
+    height, width = depth_image.shape[:2]
+    if center_x < 0 or center_y < 0 or center_x >= width or center_y >= height:
+        return None
+
+    depth_mm = float(depth_image[center_y, center_x])
+    if depth_mm <= 0.0:
+        return None
+    return depth_mm
+
+
+def prepare_depth_for_lookup(depth_image, image_shape, aligned_to_color: bool):
+    if depth_image is None:
+        return None
+
+    image_height, image_width = image_shape[:2]
+    depth_height, depth_width = depth_image.shape[:2]
+    if depth_width == image_width and depth_height == image_height:
+        return depth_image
+
+    if not aligned_to_color:
+        return None
+
+    return cv2.resize(depth_image, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+
+
+def draw_detection_centers(result, image, depth_image=None) -> list[dict[str, object]]:
     detections: list[dict[str, object]] = []
     if result.boxes is None:
         return detections
@@ -422,11 +519,13 @@ def draw_detection_centers(result, image) -> list[dict[str, object]]:
         center_x = int(round((x1 + x2) / 2.0))
         center_y = int(round((y1 + y2) / 2.0))
         class_name = result.names.get(cls_id, CLASS_NAMES.get(cls_id, str(cls_id)))
+        depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
+        depth_text = f",Z={depth_mm:.0f}mm" if depth_mm is not None else ",Z=?"
 
         cv2.circle(image, (center_x, center_y), 4, (0, 0, 255), -1)
         cv2.putText(
             image,
-            f"({center_x},{center_y})",
+            f"({center_x},{center_y}{depth_text})",
             (center_x + 6, center_y - 6),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -441,6 +540,7 @@ def draw_detection_centers(result, image) -> list[dict[str, object]]:
                 "confidence": conf,
                 "center_x": center_x,
                 "center_y": center_y,
+                "depth_mm": depth_mm,
             }
         )
 
@@ -454,9 +554,9 @@ def print_detections(frame_id: int, detections: list[dict[str, object]]) -> None
 
     items = []
     for det in detections:
-        items.append(
-            "{class_name} conf={confidence:.3f} center=({center_x},{center_y})".format(**det)
-        )
+        depth = det["depth_mm"]
+        depth_text = f" z={depth:.0f}mm" if depth is not None else " z=?"
+        items.append("{class_name} conf={confidence:.3f} center=({center_x},{center_y})".format(**det) + depth_text)
     print(f"[FRAME {frame_id}] " + " | ".join(items))
 
 
@@ -580,6 +680,7 @@ def main() -> None:
     display = None
     frame_id = 0
     started_at = time.time()
+    warned_depth_unaligned = False
 
     if args.preview_only:
         print("[OK] Preview only: YOLO model is not loaded.")
@@ -587,6 +688,8 @@ def main() -> None:
         print(f"[OK] Model: {model_path}")
     if args.camera_source == "orbbec":
         print(f"[OK] Camera: Orbbec COLOR_SENSOR via SDK {args.orbbec_sdk_dir}")
+        if not args.disable_depth:
+            print("[OK] Depth: enabled. Z is read at each detection center.")
     else:
         print(f"[OK] Camera: {args.camera_url if args.camera_url else args.camera_index}")
         print(f"[OK] Backend: {backend_name(resolve_backend(args.backend, is_url=bool(args.camera_url)))}")
@@ -613,6 +716,16 @@ def main() -> None:
                 annotated = frame.copy()
                 detections = []
             else:
+                raw_depth = getattr(capture, "last_depth_image", None)
+                aligned_to_color = bool(getattr(capture, "depth_aligned_to_color", False))
+                depth_for_lookup = prepare_depth_for_lookup(raw_depth, frame.shape, aligned_to_color)
+                if raw_depth is not None and depth_for_lookup is None and not warned_depth_unaligned:
+                    print(
+                        "[WARN] Depth frame is not aligned to the RGB image, so Z lookup is disabled. "
+                        "Use --orbbec-depth-align sw or --orbbec-depth-align hw."
+                    )
+                    warned_depth_unaligned = True
+
                 result = model.predict(
                     source=frame,
                     imgsz=args.imgsz,
@@ -623,7 +736,7 @@ def main() -> None:
                     verbose=False,
                 )[0]
                 annotated = result.plot(line_width=args.line_width)
-                detections = draw_detection_centers(result, annotated)
+                detections = draw_detection_centers(result, annotated, depth_for_lookup)
 
             elapsed = max(time.time() - started_at, 1e-6)
             fps_text = f"FPS: {frame_id / elapsed:.1f}"

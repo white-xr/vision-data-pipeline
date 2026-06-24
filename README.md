@@ -258,6 +258,21 @@ python tools/camera_detect.py \
   --device 0
 ```
 
+Orbbec 模式默认同时开启深度流，并使用软件 depth-to-color 对齐。检测结果中的红色坐标会显示：
+
+```text
+(x,y,Z=1234mm)
+```
+
+其中 `x,y` 是 RGB 图像中的孔中心像素坐标，`Z` 是该中心点对应的深度值，单位为毫米。如果显示 `Z=?`，通常表示该点深度无效、深度帧未对齐到彩色帧，或者该像素位置没有有效深度。
+
+可以手动切换深度对齐模式：
+
+```bash
+python tools/camera_detect.py --camera-source orbbec --orbbec-depth-align sw --display-backend tkinter
+python tools/camera_detect.py --camera-source orbbec --orbbec-depth-align hw --display-backend tkinter
+```
+
 Windows 上本机相机默认使用 DirectShow 后端。如果 `0` 号相机不可用，可以换编号或后端：
 
 ```bash
