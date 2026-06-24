@@ -65,19 +65,6 @@ hard
 bad
 ```
 
-tag 含义：
-
-- `to_annotate`：孔位清晰，适合标注。
-- `hard`：有点暗、亮、反光、模糊或角度偏，但孔位还能判断，作为困难样本保留。
-- `bad`：孔看不清、严重模糊、严重过曝、严重遮挡，不进入训练集。
-
-筛选注意事项：
-
-- 有孔但没标的图片不能进入训练集。
-- 看不清孔中心的图片不要进入训练集。
-- 困难样本如果人眼还能标，就应该保留。
-- 真正没有孔但像孔的干扰图，后续可以作为负样本保留为空标注。
-
 导出准备标注的图片：
 
 ```bash
@@ -87,25 +74,70 @@ python tools/export_annotation_candidates.py \
   --include-tags to_annotate hard
 ```
 
-导出结果：
+## LabelImg 检测框标注
+
+当前工业视觉孔位检测任务只做目标检测，不做分割。只标边缘安装孔，不标内部孔。完整标注规则见 [docs/labeling_rules.md](docs/labeling_rules.md)。
+
+类别文件：
 
 ```text
-data/annotation/hole_detect_v1/
-├── images/
-│   ├── base_01_000001.png
-│   ├── base_01_000002.png
-│   └── ...
-└── export_manifest.csv
+configs/classes.txt
 ```
 
-后续流程：
+类别只使用：
+
+```text
+cover_edge_hole
+base_edge_hole
+```
+
+从 `data/raw/` 准备 LabelImg 标注目录：
+
+```bash
+python tools/prepare_labelimg_dataset.py --raw-dir data/raw --out-dir data/annotation/hole_detect_v1
+```
+
+该命令只复制原图，不会删除、移动、重命名 `data/raw/` 中的原始图片。复制后的图片会带上 batch 名，例如：
+
+```text
+data/raw/base_01/000001.png
+data/annotation/hole_detect_v1/images/base_01_000001.png
+```
+
+启动 LabelImg：
+
+```bash
+labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+```
+
+或者：
+
+```bash
+python -m labelImg data/annotation/hole_detect_v1/images configs/classes.txt
+```
+
+打开 LabelImg 后：
+
+1. 点击 `Change Save Dir`
+2. 保存目录设为 `data/annotation/hole_detect_v1/labels/`
+3. 标注格式选择 `YOLO`
+4. 每个边缘安装孔一个框，只标边缘孔，内部孔不标
+
+训练前必须检查：
+
+- 每张参与训练的图片是否有对应 `.txt` 标签文件。
+- 有孔但没标注的图片不能进入训练集。
+- 真正无目标的负样本可以保留为空标签。
+- 标签类别 id 必须只包含 `0` 或 `1`。
+
+## 后续流程
 
 ```text
 FiftyOne 人工筛选
 ↓
-导出 annotation/images
+导出或准备 annotation/images
 ↓
-CVAT 或 LabelImg 标注
+LabelImg 标注边缘安装孔
 ↓
 导出 YOLO Detect 数据集
 ↓

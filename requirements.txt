@@ -1,4 +1,5 @@
 fiftyone
+labelImg
 opencv-python
 pandas
 numpy
