@@ -18,11 +18,13 @@ env/
 .idea/
 
 # Vision datasets and generated artifacts
+data/
 datasets/
 raw_data/
 captures/
 weights/
 runs/
+models/
 logs/
 Log/
 rgbd_yolo_results/
@@ -41,4 +43,3 @@ rgbd_yolo_results/
 *.zip
 *.rar
 *.7z
-
