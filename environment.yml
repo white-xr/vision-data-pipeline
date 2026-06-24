@@ -11,4 +11,5 @@ dependencies:
       - fiftyone
       - anylabeling
       - imgviz<2
+      - ultralytics
       - opencv-python

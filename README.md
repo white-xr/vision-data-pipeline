@@ -192,3 +192,45 @@ AnyLabeling 标注边缘安装孔
 ## 提交规范
 
 提交信息和推送规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 相机实时识别
+
+训练完成后，可以使用 `tools/camera_detect.py` 接入本机相机或网络相机实时识别边缘安装孔。脚本默认加载当前训练得到的模型：
+
+```text
+runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
+```
+
+使用本机默认相机：
+
+```bash
+python tools/camera_detect.py --camera-index 0
+```
+
+指定模型、置信度和推理尺寸：
+
+```bash
+python tools/camera_detect.py \
+  --model runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt \
+  --camera-index 0 \
+  --imgsz 1280 \
+  --conf 0.25 \
+  --device 0
+```
+
+使用 RTSP/HTTP 网络相机：
+
+```bash
+python tools/camera_detect.py --camera-url rtsp://user:password@192.168.1.10/stream1
+```
+
+如果当前环境使用的是 `opencv-python-headless`，窗口显示可能不可用，可以改为保存识别视频：
+
+```bash
+python tools/camera_detect.py \
+  --camera-index 0 \
+  --no-window \
+  --save-video data/reports/hole_detect_v1/camera_detect.mp4
+```
+
+窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图到 `data/reports/hole_detect_v1/camera_snapshots/`。脚本会在检测框中心画红点，并显示中心像素坐标，后续可用于机械臂对准流程接入。
