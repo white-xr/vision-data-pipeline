@@ -201,33 +201,23 @@ AnyLabeling 标注边缘安装孔
 runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
 ```
 
-使用本机默认相机：
+默认配置文件：
 
-```bash
-python tools/camera_detect.py --camera-index 0
+```text
+configs/camera_detect.yaml
 ```
 
-当前环境如果安装的是 `opencv-python-headless`，请使用 Tkinter 窗口显示：
+启动实时识别：
 
 ```bash
-python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend tkinter
+python tools/camera_detect.py
 ```
 
-如果打开相机后提示读不到画面，先扫描可用相机编号：
+常用参数都写在 `configs/camera_detect.yaml` 中，包括模型路径、相机类型、Orbbec SDK 路径、深度对齐方式、置信度、推理尺寸、显示窗口和调试开关。日常使用只需要修改这份配置文件。
 
-```bash
-python tools/camera_detect.py --list-cameras
-```
+当前默认配置使用奥比中光 RGB-D 相机、Tkinter 显示窗口、软件 depth-to-color 对齐，并显示检测中心的深度 `Z`。奥比中光相机不要用普通 OpenCV 编号读取，否则可能拿到深度、红外或空流。
 
-如果窗口能打开但画面全黑，先只看原始相机画面，不加载模型：
-
-```bash
-python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend tkinter --preview-only --print-frame-stats
-```
-
-窗口左上角的 `min/max/mean` 是原始帧亮度范围。`mean` 很低并且 `max` 接近 0 时，说明相机输出本身就是黑图，需要换相机编号、后端、光源或检查镜头/曝光。
-
-奥比中光 RGB-D 相机不要用普通 OpenCV 编号读取，否则可能拿到深度、红外或空流。请先安装 Orbbec Python wrapper：
+首次使用 Orbbec 模式前，请安装 Orbbec Python wrapper：
 
 ```bash
 python -m pip install --no-deps pyorbbecsdk2
@@ -235,28 +225,7 @@ python -m pip install --no-deps pyorbbecsdk2
 
 这里使用 `--no-deps` 是为了避免 `pyorbbecsdk2` 自动升级 `numpy`，破坏 AnyLabeling、onnxruntime 和当前 YOLO 环境。
 
-然后直接读取 Orbbec `COLOR_SENSOR` 彩色流：
-
-```bash
-python tools/camera_detect.py \
-  --camera-source orbbec \
-  --orbbec-sdk-dir D:/OrbbecSDK_v2 \
-  --display-backend tkinter \
-  --preview-only \
-  --print-frame-stats
-```
-
-确认能看到彩色画面后，再运行 YOLO 实时识别：
-
-```bash
-python tools/camera_detect.py \
-  --camera-source orbbec \
-  --orbbec-sdk-dir D:/OrbbecSDK_v2 \
-  --display-backend tkinter \
-  --imgsz 1280 \
-  --conf 0.25 \
-  --device 0
-```
+如果只想看原始相机画面、不跑模型，把 `configs/camera_detect.yaml` 中的 `preview_only` 改为 `true`。如果要排查黑屏，把 `print_frame_stats` 改为 `true`，窗口左上角的 `min/max/mean` 会显示原始帧亮度范围。
 
 Orbbec 模式默认同时开启深度流，并使用软件 depth-to-color 对齐。检测结果中的红色坐标会显示：
 
@@ -266,45 +235,11 @@ Orbbec 模式默认同时开启深度流，并使用软件 depth-to-color 对齐
 
 其中 `x,y` 是 RGB 图像中的孔中心像素坐标，`Z` 是该中心点对应的深度值，单位为毫米。如果显示 `Z=?`，通常表示该点深度无效、深度帧未对齐到彩色帧，或者该像素位置没有有效深度。
 
-可以手动切换深度对齐模式：
+可以在配置文件中切换深度对齐模式：
 
-```bash
-python tools/camera_detect.py --camera-source orbbec --orbbec-depth-align sw --display-backend tkinter
-python tools/camera_detect.py --camera-source orbbec --orbbec-depth-align hw --display-backend tkinter
-```
-
-Windows 上本机相机默认使用 DirectShow 后端。如果 `0` 号相机不可用，可以换编号或后端：
-
-```bash
-python tools/camera_detect.py --camera-index 1 --backend dshow
-python tools/camera_detect.py --camera-index 0 --backend msmf
-python tools/camera_detect.py --camera-index 0 --backend any
-```
-
-指定模型、置信度和推理尺寸：
-
-```bash
-python tools/camera_detect.py \
-  --model runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt \
-  --camera-index 0 \
-  --imgsz 1280 \
-  --conf 0.25 \
-  --device 0
-```
-
-使用 RTSP/HTTP 网络相机：
-
-```bash
-python tools/camera_detect.py --camera-url rtsp://user:password@192.168.1.10/stream1
-```
-
-如果当前环境使用的是 `opencv-python-headless`，窗口显示可能不可用，可以改为保存识别视频：
-
-```bash
-python tools/camera_detect.py \
-  --camera-index 0 \
-  --no-window \
-  --save-video data/reports/hole_detect_v1/camera_detect.mp4
+```yaml
+# configs/camera_detect.yaml
+orbbec_depth_align: sw  # sw 或 hw
 ```
 
 窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图到 `data/reports/hole_detect_v1/camera_snapshots/`。脚本会在检测框中心画红点，并显示中心像素坐标，后续可用于机械臂对准流程接入。

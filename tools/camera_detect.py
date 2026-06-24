@@ -23,6 +23,7 @@ import cv2
 DEFAULT_MODEL = Path(
     "runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt"
 )
+DEFAULT_CONFIG = Path("configs/camera_detect.yaml")
 CLASS_NAMES = {
     0: "cover_edge_hole",
     1: "base_edge_hole",
@@ -33,174 +34,133 @@ BACKENDS = {
     "msmf": cv2.CAP_MSMF,
     "obsensor": getattr(cv2, "CAP_OBSENSOR", cv2.CAP_ANY),
 }
+ARG_SPECS = {
+    "model": {"flags": ["--model"], "type": Path, "default": DEFAULT_MODEL},
+    "camera_index": {"flags": ["--camera-index"], "type": int, "default": 0},
+    "camera_source": {"flags": ["--camera-source"], "choices": ["opencv", "orbbec"], "default": "opencv"},
+    "camera_url": {"flags": ["--camera-url"], "type": str, "default": None},
+    "backend": {"flags": ["--backend"], "choices": ["auto", *BACKENDS.keys()], "default": "auto"},
+    "read_retries": {"flags": ["--read-retries"], "type": int, "default": 30},
+    "list_cameras": {"flags": ["--list-cameras"], "action": "store_true", "default": False},
+    "preview_only": {"flags": ["--preview-only"], "action": "store_true", "default": False},
+    "print_frame_stats": {"flags": ["--print-frame-stats"], "action": "store_true", "default": False},
+    "imgsz": {"flags": ["--imgsz"], "type": int, "default": 1280},
+    "conf": {"flags": ["--conf"], "type": float, "default": 0.25},
+    "iou": {"flags": ["--iou"], "type": float, "default": 0.45},
+    "device": {"flags": ["--device"], "default": "0"},
+    "width": {"flags": ["--width"], "type": int, "default": 1280},
+    "height": {"flags": ["--height"], "type": int, "default": 720},
+    "fps": {"flags": ["--fps"], "type": float, "default": 30.0},
+    "orbbec_sdk_dir": {"flags": ["--orbbec-sdk-dir"], "type": Path, "default": Path("D:/OrbbecSDK_v2")},
+    "orbbec_format": {
+        "flags": ["--orbbec-format"],
+        "choices": ["RGB", "MJPG", "YUYV", "UYVY", "NV12", "NV21", "I420", "default"],
+        "default": "RGB",
+    },
+    "orbbec_depth_align": {"flags": ["--orbbec-depth-align"], "choices": ["sw", "hw", "disable"], "default": "sw"},
+    "disable_depth": {"flags": ["--disable-depth"], "action": "store_true", "default": False},
+    "orbbec_timeout_ms": {"flags": ["--orbbec-timeout-ms"], "type": int, "default": 1000},
+    "max_det": {"flags": ["--max-det"], "type": int, "default": 100},
+    "line_width": {"flags": ["--line-width"], "type": int, "default": 2},
+    "save_video": {"flags": ["--save-video"], "type": Path, "default": None},
+    "snapshot_dir": {
+        "flags": ["--snapshot-dir"],
+        "type": Path,
+        "default": Path("data/reports/hole_detect_v1/camera_snapshots"),
+    },
+    "no_window": {"flags": ["--no-window"], "action": "store_true", "default": False},
+    "display_backend": {"flags": ["--display-backend"], "choices": ["auto", "opencv", "tkinter"], "default": "auto"},
+    "print_detections": {"flags": ["--print-detections"], "action": "store_true", "default": False},
+}
 
 
-def parse_args() -> argparse.Namespace:
+def add_runtime_arguments(parser: argparse.ArgumentParser, use_defaults: bool) -> None:
+    for dest, spec in ARG_SPECS.items():
+        kwargs = {key: value for key, value in spec.items() if key != "flags"}
+        if not use_defaults:
+            kwargs["default"] = None
+        else:
+            kwargs.setdefault("default", spec.get("default"))
+        parser.add_argument(*spec["flags"], dest=dest, **kwargs)
+
+
+def parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, argparse.Namespace]:
     parser = argparse.ArgumentParser(
         description="Run YOLO Detect inference from a local camera or stream."
     )
     parser.add_argument(
-        "--model",
+        "--config",
         type=Path,
-        default=DEFAULT_MODEL,
-        help=f"YOLO model path. Default: {DEFAULT_MODEL}",
+        default=DEFAULT_CONFIG,
+        help=f"YAML config path. Default: {DEFAULT_CONFIG}",
     )
     parser.add_argument(
-        "--camera-index",
-        type=int,
-        default=0,
-        help="Local camera index used when --camera-url is not set. Default: 0.",
-    )
-    parser.add_argument(
-        "--camera-source",
-        choices=["opencv", "orbbec"],
-        default="opencv",
-        help="Camera source type. Use orbbec for Orbbec RGB-D COLOR_SENSOR. Default: opencv.",
-    )
-    parser.add_argument(
-        "--camera-url",
-        type=str,
-        default=None,
-        help="Camera stream URL, for example RTSP/HTTP. Overrides --camera-index.",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["auto", *BACKENDS.keys()],
-        default="auto",
-        help="OpenCV capture backend for local cameras. Windows auto uses dshow. Default: auto.",
-    )
-    parser.add_argument(
-        "--read-retries",
-        type=int,
-        default=30,
-        help="Frame read retries before giving up. Default: 30.",
-    )
-    parser.add_argument(
-        "--list-cameras",
+        "--no-config",
         action="store_true",
-        help="Scan local camera indexes and exit without loading the model.",
+        help="Ignore YAML config and use built-in defaults plus command line arguments.",
     )
-    parser.add_argument(
-        "--preview-only",
-        action="store_true",
-        help="Show raw camera frames without loading or running YOLO.",
-    )
-    parser.add_argument(
-        "--print-frame-stats",
-        action="store_true",
-        help="Print raw frame min/max/mean brightness for debugging black frames.",
-    )
-    parser.add_argument(
-        "--imgsz",
-        type=int,
-        default=1280,
-        help="Inference image size. Default: 1280.",
-    )
-    parser.add_argument(
-        "--conf",
-        type=float,
-        default=0.25,
-        help="Confidence threshold. Default: 0.25.",
-    )
-    parser.add_argument(
-        "--iou",
-        type=float,
-        default=0.45,
-        help="NMS IoU threshold. Default: 0.45.",
-    )
-    parser.add_argument(
-        "--device",
-        default="0",
-        help="Inference device, for example 0, cpu. Default: 0.",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=1280,
-        help="Requested camera width for local cameras. Default: 1280.",
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=720,
-        help="Requested camera height for local cameras. Default: 720.",
-    )
-    parser.add_argument(
-        "--fps",
-        type=float,
-        default=30.0,
-        help="Requested camera FPS for local cameras. Default: 30.",
-    )
-    parser.add_argument(
-        "--orbbec-sdk-dir",
-        type=Path,
-        default=Path("D:/OrbbecSDK_v2"),
-        help="Local Orbbec SDK root used to locate DLLs. Default: D:/OrbbecSDK_v2.",
-    )
-    parser.add_argument(
-        "--orbbec-format",
-        choices=["RGB", "MJPG", "YUYV", "UYVY", "NV12", "NV21", "I420", "default"],
-        default="RGB",
-        help="Requested Orbbec color stream format. Default: RGB.",
-    )
-    parser.add_argument(
-        "--orbbec-depth-align",
-        choices=["sw", "hw", "disable"],
-        default="sw",
-        help="Depth-to-color alignment mode for Orbbec RGB-D. Default: sw.",
-    )
-    parser.add_argument(
-        "--disable-depth",
-        action="store_true",
-        help="Disable Orbbec depth stream and show 2D pixel centers only.",
-    )
-    parser.add_argument(
-        "--orbbec-timeout-ms",
-        type=int,
-        default=1000,
-        help="Orbbec frame wait timeout in milliseconds. Default: 1000.",
-    )
-    parser.add_argument(
-        "--max-det",
-        type=int,
-        default=100,
-        help="Maximum detections per frame. Default: 100.",
-    )
-    parser.add_argument(
-        "--line-width",
-        type=int,
-        default=2,
-        help="Bounding box line width. Default: 2.",
-    )
-    parser.add_argument(
-        "--save-video",
-        type=Path,
-        default=None,
-        help="Optional output video path, for example data/reports/hole_detect_v1/camera.mp4.",
-    )
-    parser.add_argument(
-        "--snapshot-dir",
-        type=Path,
-        default=Path("data/reports/hole_detect_v1/camera_snapshots"),
-        help="Directory for snapshots saved by pressing s.",
-    )
-    parser.add_argument(
-        "--no-window",
-        action="store_true",
-        help="Do not open a display window. Useful for headless OpenCV environments.",
-    )
-    parser.add_argument(
-        "--display-backend",
-        choices=["auto", "opencv", "tkinter"],
-        default="auto",
-        help="Display backend for the live window. Default: auto.",
-    )
-    parser.add_argument(
-        "--print-detections",
-        action="store_true",
-        help="Print detected class, confidence, and center pixel for each frame.",
-    )
-    return parser.parse_args()
+    add_runtime_arguments(parser, use_defaults=False)
+
+    defaults_parser = argparse.ArgumentParser(add_help=False)
+    defaults_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    defaults_parser.add_argument("--no-config", action="store_true")
+    add_runtime_arguments(defaults_parser, use_defaults=True)
+    return parser.parse_args(argv), defaults_parser.parse_args(argv)
+
+
+def load_yaml_config(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        if path == DEFAULT_CONFIG:
+            return {}
+        raise SystemExit(f"[ERROR] Config file not found: {path}")
+
+    try:
+        import yaml
+    except ImportError as exc:
+        raise SystemExit(
+            "[ERROR] Missing dependency: PyYAML. Install dependencies first: python -m pip install PyYAML"
+        ) from exc
+
+    with path.open("r", encoding="utf-8") as file:
+        data = yaml.safe_load(file) or {}
+
+    if not isinstance(data, dict):
+        raise SystemExit(f"[ERROR] Config file must contain a YAML mapping: {path}")
+    return data
+
+
+def coerce_config_value(dest: str, value):
+    if value is None:
+        return None
+    value_type = ARG_SPECS[dest].get("type")
+    if value_type is Path:
+        return Path(value)
+    if value_type is not None:
+        return value_type(value)
+    return value
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    cli_args, defaults = parse_cli_args(argv)
+    values = vars(defaults).copy()
+
+    if not cli_args.no_config:
+        config = load_yaml_config(cli_args.config)
+        unknown_keys = sorted(set(config) - set(ARG_SPECS))
+        if unknown_keys:
+            raise SystemExit(f"[ERROR] Unknown config keys in {cli_args.config}: {', '.join(unknown_keys)}")
+        for key, value in config.items():
+            values[key] = coerce_config_value(key, value)
+
+    for key, value in vars(cli_args).items():
+        if key in {"config", "no_config"}:
+            values[key] = value
+        elif value is not None:
+            values[key] = value
+
+    values["config"] = cli_args.config
+    values["no_config"] = cli_args.no_config
+    return argparse.Namespace(**values)
 
 
 def resolve_backend(name: str, is_url: bool) -> int:

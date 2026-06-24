@@ -4,5 +4,6 @@ imgviz<2
 ultralytics
 opencv-python
 pillow
+PyYAML
 pandas
 numpy

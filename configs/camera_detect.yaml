@@ -1,0 +1,49 @@
+# 相机实时识别运行配置。
+# 启动命令：
+#   python tools/camera_detect.py
+
+# YOLO 模型路径。默认指向当前孔位检测 best.pt。
+model: runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
+
+# 相机来源：
+#   orbbec = 奥比中光 RGB-D 相机，通过 pyorbbecsdk2 读取彩色流和深度流
+#   opencv = 普通 USB/RTSP/HTTP 相机，通过 OpenCV VideoCapture 读取
+camera_source: orbbec
+
+# OpenCV 相机配置。仅当 camera_source: opencv 时生效。
+camera_index: 0
+camera_url: null
+backend: auto
+read_retries: 30
+
+# 奥比中光 SDK 配置。仅当 camera_source: orbbec 时生效。
+orbbec_sdk_dir: D:/OrbbecSDK_v2
+orbbec_format: RGB
+orbbec_depth_align: sw   # sw = 软件深度对齐到彩色，hw = 硬件对齐，disable = 不对齐
+disable_depth: false     # true = 只显示 2D 像素中心，false = 显示可用的 Z 深度
+orbbec_timeout_ms: 1000
+
+# 相机流请求参数。
+width: 1280
+height: 720
+fps: 30.0
+
+# YOLO 推理参数。
+imgsz: 1280
+conf: 0.50
+iou: 0.45
+device: "0"              # "0" = 第一块 CUDA GPU，"cpu" = 使用 CPU
+max_det: 100
+line_width: 2
+
+# 显示和输出配置。
+display_backend: tkinter # tkinter 兼容 opencv-python-headless；opencv 需要带 GUI 的 OpenCV
+no_window: false
+save_video: null         # 示例：data/reports/hole_detect_v1/camera_detect.mp4
+snapshot_dir: data/reports/hole_detect_v1/camera_snapshots
+
+# 调试开关。
+preview_only: false      # true = 只看相机画面，不加载/运行 YOLO
+print_frame_stats: false # true = 打印亮度统计，用于排查黑屏
+print_detections: false  # true = 每帧打印类别、置信度、中心点和 Z
+list_cameras: false      # true = 扫描 OpenCV 相机编号后退出

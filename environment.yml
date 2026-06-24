@@ -14,3 +14,4 @@ dependencies:
       - ultralytics
       - opencv-python
       - pillow
+      - PyYAML
