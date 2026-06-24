@@ -74,6 +74,16 @@ def parse_args() -> argparse.Namespace:
         help="Scan local camera indexes and exit without loading the model.",
     )
     parser.add_argument(
+        "--preview-only",
+        action="store_true",
+        help="Show raw camera frames without loading or running YOLO.",
+    )
+    parser.add_argument(
+        "--print-frame-stats",
+        action="store_true",
+        help="Print raw frame min/max/mean brightness for debugging black frames.",
+    )
+    parser.add_argument(
         "--imgsz",
         type=int,
         default=1280,
@@ -248,7 +258,8 @@ def list_cameras(max_index: int = 10) -> None:
                 actual_height, actual_width = frame.shape[:2]
                 print(
                     f"[OK] index={index}, backend={backend}, "
-                    f"frame={actual_width}x{actual_height}, requested={width}x{height}, fps={fps:.1f}"
+                    f"frame={actual_width}x{actual_height}, requested={width}x{height}, "
+                    f"fps={fps:.1f}, {frame_stats_text(frame)}"
                 )
                 found = True
             else:
@@ -324,6 +335,13 @@ def save_snapshot(snapshot_dir: Path, image) -> Path:
     path = snapshot_dir / f"camera_{timestamp}.jpg"
     cv2.imwrite(str(path), image)
     return path
+
+
+def frame_stats_text(image) -> str:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    min_value, max_value, _, _ = cv2.minMaxLoc(gray)
+    mean_value = float(gray.mean())
+    return f"min={min_value:.0f} max={max_value:.0f} mean={mean_value:.1f}"
 
 
 class OpenCvDisplay:
@@ -416,11 +434,12 @@ def main() -> None:
         return
 
     model_path = args.model.resolve()
+    model = None
+    if not args.preview_only:
+        if not model_path.is_file():
+            raise SystemExit(f"[ERROR] Model not found: {model_path}")
+        model = load_model(model_path)
 
-    if not model_path.is_file():
-        raise SystemExit(f"[ERROR] Model not found: {model_path}")
-
-    model = load_model(model_path)
     capture = open_capture(args)
 
     writer: cv2.VideoWriter | None = None
@@ -428,7 +447,10 @@ def main() -> None:
     frame_id = 0
     started_at = time.time()
 
-    print(f"[OK] Model: {model_path}")
+    if args.preview_only:
+        print("[OK] Preview only: YOLO model is not loaded.")
+    else:
+        print(f"[OK] Model: {model_path}")
     print(f"[OK] Camera: {args.camera_url if args.camera_url else args.camera_index}")
     print(f"[OK] Backend: {backend_name(resolve_backend(args.backend, is_url=bool(args.camera_url)))}")
     print("[OK] Press q or Esc to quit. Press s to save a snapshot.")
@@ -449,18 +471,22 @@ def main() -> None:
                 break
 
             frame_id += 1
-            result = model.predict(
-                source=frame,
-                imgsz=args.imgsz,
-                conf=args.conf,
-                iou=args.iou,
-                device=args.device,
-                max_det=args.max_det,
-                verbose=False,
-            )[0]
-
-            annotated = result.plot(line_width=args.line_width)
-            detections = draw_detection_centers(result, annotated)
+            stats_text = frame_stats_text(frame)
+            if args.preview_only:
+                annotated = frame.copy()
+                detections = []
+            else:
+                result = model.predict(
+                    source=frame,
+                    imgsz=args.imgsz,
+                    conf=args.conf,
+                    iou=args.iou,
+                    device=args.device,
+                    max_det=args.max_det,
+                    verbose=False,
+                )[0]
+                annotated = result.plot(line_width=args.line_width)
+                detections = draw_detection_centers(result, annotated)
 
             elapsed = max(time.time() - started_at, 1e-6)
             fps_text = f"FPS: {frame_id / elapsed:.1f}"
@@ -474,6 +500,19 @@ def main() -> None:
                 2,
                 cv2.LINE_AA,
             )
+            cv2.putText(
+                annotated,
+                stats_text,
+                (12, 64),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+            if args.print_frame_stats:
+                print(f"[FRAME {frame_id}] {stats_text}")
 
             if args.print_detections:
                 print_detections(frame_id, detections)

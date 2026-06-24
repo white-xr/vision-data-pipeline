@@ -219,6 +219,14 @@ python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend
 python tools/camera_detect.py --list-cameras
 ```
 
+如果窗口能打开但画面全黑，先只看原始相机画面，不加载模型：
+
+```bash
+python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend tkinter --preview-only --print-frame-stats
+```
+
+窗口左上角的 `min/max/mean` 是原始帧亮度范围。`mean` 很低并且 `max` 接近 0 时，说明相机输出本身就是黑图，需要换相机编号、后端、光源或检查镜头/曝光。
+
 Windows 上本机相机默认使用 DirectShow 后端。如果 `0` 号相机不可用，可以换编号或后端：
 
 ```bash
