@@ -227,6 +227,37 @@ python tools/camera_detect.py --camera-index 1 --backend dshow --display-backend
 
 窗口左上角的 `min/max/mean` 是原始帧亮度范围。`mean` 很低并且 `max` 接近 0 时，说明相机输出本身就是黑图，需要换相机编号、后端、光源或检查镜头/曝光。
 
+奥比中光 RGB-D 相机不要用普通 OpenCV 编号读取，否则可能拿到深度、红外或空流。请先安装 Orbbec Python wrapper：
+
+```bash
+python -m pip install --no-deps pyorbbecsdk2
+```
+
+这里使用 `--no-deps` 是为了避免 `pyorbbecsdk2` 自动升级 `numpy`，破坏 AnyLabeling、onnxruntime 和当前 YOLO 环境。
+
+然后直接读取 Orbbec `COLOR_SENSOR` 彩色流：
+
+```bash
+python tools/camera_detect.py \
+  --camera-source orbbec \
+  --orbbec-sdk-dir D:/OrbbecSDK_v2 \
+  --display-backend tkinter \
+  --preview-only \
+  --print-frame-stats
+```
+
+确认能看到彩色画面后，再运行 YOLO 实时识别：
+
+```bash
+python tools/camera_detect.py \
+  --camera-source orbbec \
+  --orbbec-sdk-dir D:/OrbbecSDK_v2 \
+  --display-backend tkinter \
+  --imgsz 1280 \
+  --conf 0.25 \
+  --device 0
+```
+
 Windows 上本机相机默认使用 DirectShow 后端。如果 `0` 号相机不可用，可以换编号或后端：
 
 ```bash

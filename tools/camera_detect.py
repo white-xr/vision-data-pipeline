@@ -10,6 +10,7 @@ Use an RTSP/HTTP stream:
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import sys
 import time
@@ -49,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Local camera index used when --camera-url is not set. Default: 0.",
+    )
+    parser.add_argument(
+        "--camera-source",
+        choices=["opencv", "orbbec"],
+        default="opencv",
+        help="Camera source type. Use orbbec for Orbbec RGB-D COLOR_SENSOR. Default: opencv.",
     )
     parser.add_argument(
         "--camera-url",
@@ -123,6 +130,24 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=30.0,
         help="Requested camera FPS for local cameras. Default: 30.",
+    )
+    parser.add_argument(
+        "--orbbec-sdk-dir",
+        type=Path,
+        default=Path("D:/OrbbecSDK_v2"),
+        help="Local Orbbec SDK root used to locate DLLs. Default: D:/OrbbecSDK_v2.",
+    )
+    parser.add_argument(
+        "--orbbec-format",
+        choices=["RGB", "MJPG", "YUYV", "UYVY", "NV12", "NV21", "I420", "default"],
+        default="RGB",
+        help="Requested Orbbec color stream format. Default: RGB.",
+    )
+    parser.add_argument(
+        "--orbbec-timeout-ms",
+        type=int,
+        default=1000,
+        help="Orbbec frame wait timeout in milliseconds. Default: 1000.",
     )
     parser.add_argument(
         "--max-det",
@@ -221,6 +246,112 @@ def open_capture(args: argparse.Namespace) -> cv2.VideoCapture:
         )
 
     return capture
+
+
+def add_orbbec_dll_dirs(sdk_dir: Path) -> None:
+    bin_dir = sdk_dir / "bin"
+    if not bin_dir.is_dir():
+        return
+
+    if hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(str(bin_dir))
+
+    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
+def orbbec_frame_to_bgr(frame, ob_format) -> object | None:
+    import numpy as np
+
+    width = frame.get_width()
+    height = frame.get_height()
+    color_format = frame.get_format()
+    data = np.asanyarray(frame.get_data())
+
+    if color_format == ob_format.RGB:
+        image = np.resize(data, (height, width, 3))
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    if hasattr(ob_format, "BGR") and color_format == ob_format.BGR:
+        return np.resize(data, (height, width, 3))
+    if color_format == ob_format.MJPG:
+        return cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if color_format == ob_format.YUYV:
+        image = np.resize(data, (height, width, 2))
+        return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_YUY2)
+    if color_format == ob_format.UYVY:
+        image = np.resize(data, (height, width, 2))
+        return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_UYVY)
+    if color_format == ob_format.NV12:
+        image = np.resize(data, (height * 3 // 2, width))
+        return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_NV12)
+    if color_format == ob_format.NV21:
+        image = np.resize(data, (height * 3 // 2, width))
+        return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_NV21)
+    if color_format == ob_format.I420:
+        image = np.resize(data, (height * 3 // 2, width))
+        return cv2.cvtColor(image, cv2.COLOR_YUV2BGR_I420)
+
+    print(f"[WARN] Unsupported Orbbec color format: {color_format}")
+    return None
+
+
+class OrbbecColorCapture:
+    def __init__(self, args: argparse.Namespace) -> None:
+        add_orbbec_dll_dirs(args.orbbec_sdk_dir)
+        try:
+            from pyorbbecsdk import Config, OBError, OBFormat, OBSensorType, Pipeline
+        except ImportError as exc:
+            raise SystemExit(
+                "[ERROR] Missing Orbbec Python wrapper.\n"
+                "Install it first: python -m pip install --no-deps pyorbbecsdk2\n"
+                f"SDK path checked: {args.orbbec_sdk_dir}"
+            ) from exc
+
+        self.ob_format = OBFormat
+        self.pipeline = Pipeline()
+        config = Config()
+
+        profile_list = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+        color_profile = None
+        if args.orbbec_format != "default":
+            requested_format = getattr(OBFormat, args.orbbec_format)
+            try:
+                color_profile = profile_list.get_video_stream_profile(
+                    args.width,
+                    0,
+                    requested_format,
+                    int(args.fps),
+                )
+            except OBError as exc:
+                print(f"[WARN] Requested Orbbec color profile is unavailable: {exc}")
+
+        if color_profile is None:
+            color_profile = profile_list.get_default_video_stream_profile()
+
+        print(f"[OK] Orbbec color profile: {color_profile}")
+        config.enable_stream(color_profile)
+        self.pipeline.start(config)
+        self.timeout_ms = args.orbbec_timeout_ms
+        self.fps = args.fps
+
+    def read(self) -> tuple[bool, object | None]:
+        frames = self.pipeline.wait_for_frames(self.timeout_ms)
+        if frames is None:
+            return False, None
+
+        color_frame = frames.get_color_frame()
+        if color_frame is None:
+            return False, None
+
+        image = orbbec_frame_to_bgr(color_frame, self.ob_format)
+        return (image is not None), image
+
+    def get(self, prop: int) -> float:
+        if prop == cv2.CAP_PROP_FPS:
+            return float(self.fps)
+        return 0.0
+
+    def release(self) -> None:
+        self.pipeline.stop()
 
 
 def load_model(model_path: Path):
@@ -440,7 +571,10 @@ def main() -> None:
             raise SystemExit(f"[ERROR] Model not found: {model_path}")
         model = load_model(model_path)
 
-    capture = open_capture(args)
+    if args.camera_source == "orbbec":
+        capture = OrbbecColorCapture(args)
+    else:
+        capture = open_capture(args)
 
     writer: cv2.VideoWriter | None = None
     display = None
@@ -451,8 +585,11 @@ def main() -> None:
         print("[OK] Preview only: YOLO model is not loaded.")
     else:
         print(f"[OK] Model: {model_path}")
-    print(f"[OK] Camera: {args.camera_url if args.camera_url else args.camera_index}")
-    print(f"[OK] Backend: {backend_name(resolve_backend(args.backend, is_url=bool(args.camera_url)))}")
+    if args.camera_source == "orbbec":
+        print(f"[OK] Camera: Orbbec COLOR_SENSOR via SDK {args.orbbec_sdk_dir}")
+    else:
+        print(f"[OK] Camera: {args.camera_url if args.camera_url else args.camera_index}")
+        print(f"[OK] Backend: {backend_name(resolve_backend(args.backend, is_url=bool(args.camera_url)))}")
     print("[OK] Press q or Esc to quit. Press s to save a snapshot.")
 
     try:
