@@ -131,6 +131,29 @@ python -m anylabeling.app
 - 真正无目标的负样本可以保留为空标签。
 - 标签类别 id 必须只包含 `0` 或 `1`。
 
+## YOLO Detect 数据集划分
+
+从已标注目录生成 YOLO Detect 训练集和验证集：
+
+```bash
+python tools/split_yolo_dataset.py \
+  --src-dir data/annotation/hole_detect_v1 \
+  --out-dir data/datasets/hole_detect_v1 \
+  --train-ratio 0.8 \
+  --seed 42
+```
+
+脚本只会复制有同名 `.txt` 标签的图片，不会把未标注图片放进训练集。输出结构：
+
+```text
+data/datasets/hole_detect_v1/
+├── images/train
+├── images/val
+├── labels/train
+├── labels/val
+└── data.yaml
+```
+
 ## 后续流程
 
 ```text
@@ -140,7 +163,7 @@ FiftyOne 人工筛选
 ↓
 AnyLabeling 标注边缘安装孔
 ↓
-导出 YOLO Detect 数据集
+划分 YOLO Detect 数据集
 ↓
 训练 YOLO
 ```
