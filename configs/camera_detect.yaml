@@ -50,6 +50,7 @@ line_width: 1  # 检测框线宽；显示太粗/太细时调整
 draw_masks: true  # 分割模型是否绘制 mask；true=显示分割区域，false=只显示框和中心点
 draw_boxes: false  # 是否绘制检测框；分割对准只看 mask 时建议 false
 draw_labels: false  # 是否绘制类别名和置信度；只看分割和红色目标点时建议 false
+draw_centers: true  # 是否绘制中心/底部红点和坐标；false=只显示分割 mask
 conf_thres: 0.35  # 后处理置信度阈值；低于该值的 mask 不参与显示、合并和目标点计算
 target_plate_min_area: 200  # target_plate 最小 mask 像素面积；太小视为噪声丢弃
 screwdriver_tip_min_area: 100  # screwdriver_tip 最小 mask 像素面积；太小视为噪声丢弃

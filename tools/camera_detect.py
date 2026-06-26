@@ -103,6 +103,7 @@ ARG_SPECS = {
     "draw_masks": {"flags": ["--draw-masks"], "type": str_to_bool, "default": True},
     "draw_boxes": {"flags": ["--draw-boxes"], "type": str_to_bool, "default": True},
     "draw_labels": {"flags": ["--draw-labels"], "type": str_to_bool, "default": True},
+    "draw_centers": {"flags": ["--draw-centers"], "type": str_to_bool, "default": True},
     "conf_thres": {"flags": ["--conf-thres"], "type": float, "default": 0.35},
     "target_plate_min_area": {"flags": ["--target-plate-min-area"], "type": int, "default": 200},
     "screwdriver_tip_min_area": {"flags": ["--screwdriver-tip-min-area"], "type": int, "default": 100},
@@ -848,6 +849,7 @@ def draw_detection_centers(
     image,
     depth_image=None,
     mask_center_mode: str = "centroid",
+    draw_centers: bool = True,
     target_plate_morph_kernel: int = 3,
     target_plate_morph_open: int = 1,
     target_plate_morph_close: int = 1,
@@ -886,7 +888,8 @@ def draw_detection_centers(
         if center is not None:
             center_x, center_y = center
             depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
-            draw_center_marker(image, center_x, center_y, depth_mm)
+            if draw_centers:
+                draw_center_marker(image, center_x, center_y, depth_mm)
             detections.append(
                 {
                     "class_id": None,
@@ -920,7 +923,8 @@ def draw_detection_centers(
             center_source = "mask"
         depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
 
-        draw_center_marker(image, center_x, center_y, depth_mm)
+        if draw_centers:
+            draw_center_marker(image, center_x, center_y, depth_mm)
         detections.append(
             {
                 "class_id": cls_id,
@@ -1169,6 +1173,7 @@ def main() -> None:
                     annotated,
                     depth_for_lookup,
                     mask_center_mode=args.mask_center_mode,
+                    draw_centers=args.draw_centers,
                     target_plate_morph_kernel=args.target_plate_morph_kernel,
                     target_plate_morph_open=args.target_plate_morph_open,
                     target_plate_morph_close=args.target_plate_morph_close,
