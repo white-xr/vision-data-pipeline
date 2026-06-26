@@ -103,6 +103,12 @@ ARG_SPECS = {
     "draw_masks": {"flags": ["--draw-masks"], "type": str_to_bool, "default": True},
     "draw_boxes": {"flags": ["--draw-boxes"], "type": str_to_bool, "default": True},
     "draw_labels": {"flags": ["--draw-labels"], "type": str_to_bool, "default": True},
+    "conf_thres": {"flags": ["--conf-thres"], "type": float, "default": 0.35},
+    "target_plate_min_area": {"flags": ["--target-plate-min-area"], "type": int, "default": 200},
+    "screwdriver_tip_min_area": {"flags": ["--screwdriver-tip-min-area"], "type": int, "default": 100},
+    "target_plate_morph_kernel": {"flags": ["--target-plate-morph-kernel"], "type": int, "default": 3},
+    "target_plate_morph_open": {"flags": ["--target-plate-morph-open"], "type": int, "default": 1},
+    "target_plate_morph_close": {"flags": ["--target-plate-morph-close"], "type": int, "default": 1},
     "mask_center_mode": {
         "flags": ["--mask-center-mode"],
         "choices": ["centroid", "bottom", "box"],
@@ -672,6 +678,91 @@ def merged_mask_from_polygons(mask_polygons, image_shape):
     return merged
 
 
+def mask_from_polygon(mask_points, image_shape):
+    if mask_points is None or len(mask_points) == 0:
+        return None
+
+    import numpy as np
+
+    height, width = image_shape[:2]
+    points = np.asarray(mask_points, dtype=np.int32)
+    if points.size == 0:
+        return None
+    points[:, 0] = np.clip(points[:, 0], 0, width - 1)
+    points[:, 1] = np.clip(points[:, 1], 0, height - 1)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillPoly(mask, [points], 255)
+    if cv2.countNonZero(mask) == 0:
+        return None
+    return mask
+
+
+def min_area_for_class(class_name: str, args: argparse.Namespace) -> int:
+    if class_name == TARGET_PLATE_CLASS:
+        return args.target_plate_min_area
+    if class_name == "screwdriver_tip":
+        return args.screwdriver_tip_min_area
+    return 0
+
+
+def filtered_instances(result, image_shape, args: argparse.Namespace) -> list[dict[str, object]]:
+    instances: list[dict[str, object]] = []
+    if result.boxes is None:
+        return instances
+
+    for index, box in enumerate(result.boxes):
+        conf = float(box.conf[0].item())
+        if conf < args.conf_thres:
+            continue
+
+        cls_id = int(box.cls[0].item())
+        class_name = class_name_for_box(result, cls_id)
+        mask_points = result_mask_points(result, index)
+        binary_mask = mask_from_polygon(mask_points, image_shape)
+        if binary_mask is None:
+            continue
+
+        area = int(cv2.countNonZero(binary_mask))
+        if area < min_area_for_class(class_name, args):
+            continue
+
+        instances.append(
+            {
+                "index": index,
+                "class_id": cls_id,
+                "class_name": class_name,
+                "confidence": conf,
+                "xyxy": [float(value) for value in box.xyxy[0].tolist()],
+                "mask_points": mask_points,
+                "mask": binary_mask,
+                "area": area,
+            }
+        )
+
+    return instances
+
+
+def clean_binary_mask(binary_mask, kernel_size: int, open_iterations: int, close_iterations: int):
+    if binary_mask is None:
+        return None
+
+    import numpy as np
+
+    kernel_size = int(kernel_size)
+    if kernel_size <= 1:
+        return binary_mask
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+    cleaned = binary_mask
+    if open_iterations > 0:
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=open_iterations)
+    if close_iterations > 0:
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=close_iterations)
+    return cleaned
+
+
 def binary_mask_center(binary_mask, mode: str) -> tuple[int, int] | None:
     import numpy as np
 
@@ -708,34 +799,87 @@ def draw_center_marker(image, center_x: int, center_y: int, depth_mm=None) -> No
     )
 
 
+def instance_color(class_id: int) -> tuple[int, int, int]:
+    palette = [
+        (255, 128, 0),
+        (0, 220, 255),
+        (80, 180, 80),
+        (255, 80, 180),
+        (180, 80, 255),
+    ]
+    return palette[class_id % len(palette)]
+
+
+def draw_filtered_instances(image, instances: list[dict[str, object]], args: argparse.Namespace):
+    annotated = image.copy()
+    if args.draw_masks:
+        for instance in instances:
+            mask = instance["mask"]
+            color = instance_color(int(instance["class_id"]))
+            colored = annotated.copy()
+            colored[mask > 0] = color
+            annotated = cv2.addWeighted(colored, 0.35, annotated, 0.65, 0)
+
+    line_width = normalize_line_width(args.line_width)
+    if args.draw_boxes or args.draw_labels:
+        for instance in instances:
+            x1, y1, x2, y2 = [int(round(value)) for value in instance["xyxy"]]
+            color = instance_color(int(instance["class_id"]))
+            if args.draw_boxes:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, line_width)
+            if args.draw_labels:
+                label = f"{instance['class_name']} {instance['confidence']:.2f}"
+                cv2.putText(
+                    annotated,
+                    label,
+                    (x1, max(12, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    max(1, line_width),
+                    cv2.LINE_AA,
+                )
+
+    return annotated
+
+
 def draw_detection_centers(
-    result,
+    instances: list[dict[str, object]],
     image,
     depth_image=None,
     mask_center_mode: str = "centroid",
+    target_plate_morph_kernel: int = 3,
+    target_plate_morph_open: int = 1,
+    target_plate_morph_close: int = 1,
 ) -> list[dict[str, object]]:
     detections: list[dict[str, object]] = []
-    if result.boxes is None:
+    if not instances:
         return detections
 
-    target_plate_masks = []
+    target_plate_masks = [
+        instance["mask"] for instance in instances if instance["class_name"] == TARGET_PLATE_CLASS
+    ]
     target_plate_confs = []
-    for index, box in enumerate(result.boxes):
-        cls_id = int(box.cls[0].item())
-        class_name = class_name_for_box(result, cls_id)
-        if class_name != TARGET_PLATE_CLASS:
-            continue
-        mask_points = result_mask_points(result, index)
-        if mask_points is not None:
-            target_plate_masks.append(mask_points)
-            target_plate_confs.append(float(box.conf[0].item()))
+    for instance in instances:
+        if instance["class_name"] == TARGET_PLATE_CLASS:
+            target_plate_confs.append(float(instance["confidence"]))
 
     target_plate_exists = bool(target_plate_masks)
     if target_plate_exists:
-        merged_target_plate_mask = merged_mask_from_polygons(target_plate_masks, image.shape)
+        import numpy as np
+
+        merged_target_plate_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        for binary_mask in target_plate_masks:
+            merged_target_plate_mask = cv2.bitwise_or(merged_target_plate_mask, binary_mask)
+        merged_target_plate_mask = clean_binary_mask(
+            merged_target_plate_mask,
+            target_plate_morph_kernel,
+            target_plate_morph_open,
+            target_plate_morph_close,
+        )
         center = (
             None
-            if merged_target_plate_mask is None
+            if cv2.countNonZero(merged_target_plate_mask) == 0
             else binary_mask_center(merged_target_plate_mask, "bottom")
         )
         if center is not None:
@@ -754,18 +898,18 @@ def draw_detection_centers(
                 }
             )
 
-    for index, box in enumerate(result.boxes):
-        cls_id = int(box.cls[0].item())
-        conf = float(box.conf[0].item())
-        x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
-        class_name = class_name_for_box(result, cls_id)
+    for instance in instances:
+        cls_id = int(instance["class_id"])
+        conf = float(instance["confidence"])
+        x1, y1, x2, y2 = [float(value) for value in instance["xyxy"]]
+        class_name = str(instance["class_name"])
         if class_name == TARGET_PLATE_CLASS:
             continue
         if target_plate_exists and class_name in SUPPRESSED_WHEN_TARGET_EXISTS:
             continue
 
-        mask_points = result_mask_points(result, index)
-        center = None if mask_center_mode == "box" else mask_center(mask_points, mask_center_mode)
+        binary_mask = instance["mask"]
+        center = None if mask_center_mode == "box" else binary_mask_center(binary_mask, mask_center_mode)
         if center is None:
             center_x = int(round((x1 + x2) / 2.0))
             center_y = int(round((y1 + y2) / 2.0))
@@ -1011,23 +1155,22 @@ def main() -> None:
                 result = model.predict(
                     source=frame,
                     imgsz=args.imgsz,
-                    conf=args.conf,
+                    conf=max(args.conf, args.conf_thres),
                     iou=args.iou,
                     device=args.device,
                     max_det=args.max_det,
                     verbose=False,
                 )[0]
-                annotated = result.plot(
-                    line_width=normalize_line_width(args.line_width),
-                    masks=args.draw_masks,
-                    boxes=args.draw_boxes,
-                    labels=args.draw_labels,
-                )
+                instances = filtered_instances(result, frame.shape, args)
+                annotated = draw_filtered_instances(frame, instances, args)
                 detections = draw_detection_centers(
-                    result,
+                    instances,
                     annotated,
                     depth_for_lookup,
                     mask_center_mode=args.mask_center_mode,
+                    target_plate_morph_kernel=args.target_plate_morph_kernel,
+                    target_plate_morph_open=args.target_plate_morph_open,
+                    target_plate_morph_close=args.target_plate_morph_close,
                 )
 
             elapsed = max(time.time() - started_at, 1e-6)
