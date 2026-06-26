@@ -630,6 +630,10 @@ def result_mask_points(result, index: int):
     return result.masks.xy[index]
 
 
+def normalize_line_width(line_width: float) -> int:
+    return max(1, int(round(line_width)))
+
+
 def draw_detection_centers(
     result,
     image,
@@ -889,7 +893,10 @@ def main() -> None:
                     max_det=args.max_det,
                     verbose=False,
                 )[0]
-                annotated = result.plot(line_width=args.line_width, masks=args.draw_masks)
+                annotated = result.plot(
+                    line_width=normalize_line_width(args.line_width),
+                    masks=args.draw_masks,
+                )
                 detections = draw_detection_centers(
                     result,
                     annotated,
