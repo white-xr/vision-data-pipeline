@@ -1097,7 +1097,7 @@ def resolve_window_size(args: argparse.Namespace, image_shape=None) -> tuple[int
         image_height, image_width = image_shape[:2]
 
     if args.window_width is None:
-        width = args.imgsz
+        width = args.imgsz if args.resize_to_window else image_width
     else:
         width = args.window_width
 

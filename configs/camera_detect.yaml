@@ -63,9 +63,9 @@ mask_center_mode: centroid  # 分割中心点算法；centroid=mask质心，bott
 
 # 显示和输出配置。
 display_backend: tkinter  # 窗口显示后端；tkinter兼容opencv-python-headless，opencv需要GUI版OpenCV
-window_width: 1600  # Tkinter 窗口初始宽度，单位像素；想更大就调大
-window_height: 900  # Tkinter 窗口初始高度，单位像素；16:9 屏幕可用 1600x900 或 1920x1080
-# window_width/window_height 也可以设为 auto；auto 时窗口宽度跟随 imgsz，高度按相机画面比例计算
+window_width: auto  # Tkinter 窗口初始宽度；auto=不缩放时跟随相机原始宽度，缩放时跟随 imgsz
+window_height: auto  # Tkinter 窗口初始高度；auto=按相机画面比例自动计算，避免画面被裁
+# window_width/window_height 设为 auto 时，会根据 resize_to_window 自动选择原始帧尺寸或 imgsz 缩放尺寸
 resize_to_window: true  # 是否让画面随窗口大小缩放；true=拖大/全屏后画面跟着放大，false=原始大小
 no_window: false  # 是否禁用显示窗口；true=不弹窗口，适合只保存视频或后台运行
 save_video: null  # 识别视频保存路径；null=不保存，示例 data/reports/hole_detect_v1/camera_detect.mp4
