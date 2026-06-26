@@ -28,6 +28,8 @@ CLASS_NAMES = {
     0: "cover_edge_hole",
     1: "base_edge_hole",
 }
+TARGET_PLATE_CLASS = "target_plate"
+SUPPRESSED_WHEN_TARGET_EXISTS = {"screwdriver_tip"}
 BACKENDS = {
     "any": cv2.CAP_ANY,
     "dshow": cv2.CAP_DSHOW,
@@ -45,6 +47,15 @@ def str_to_bool(value) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value!r}")
+
+
+def int_or_auto(value) -> int | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"auto", "none", "null"}:
+        return None
+    return int(value)
 
 
 ARG_SPECS = {
@@ -90,6 +101,8 @@ ARG_SPECS = {
     "max_det": {"flags": ["--max-det"], "type": int, "default": 100},
     "line_width": {"flags": ["--line-width"], "type": float, "default": 2.0},
     "draw_masks": {"flags": ["--draw-masks"], "type": str_to_bool, "default": True},
+    "draw_boxes": {"flags": ["--draw-boxes"], "type": str_to_bool, "default": True},
+    "draw_labels": {"flags": ["--draw-labels"], "type": str_to_bool, "default": True},
     "mask_center_mode": {
         "flags": ["--mask-center-mode"],
         "choices": ["centroid", "bottom", "box"],
@@ -103,8 +116,8 @@ ARG_SPECS = {
     },
     "no_window": {"flags": ["--no-window"], "action": "store_true", "default": False},
     "display_backend": {"flags": ["--display-backend"], "choices": ["auto", "opencv", "tkinter"], "default": "auto"},
-    "window_width": {"flags": ["--window-width"], "type": int, "default": 1280},
-    "window_height": {"flags": ["--window-height"], "type": int, "default": 720},
+    "window_width": {"flags": ["--window-width"], "type": int_or_auto, "default": 1280},
+    "window_height": {"flags": ["--window-height"], "type": int_or_auto, "default": 720},
     "resize_to_window": {"flags": ["--resize-to-window"], "type": str_to_bool, "default": True},
     "print_detections": {"flags": ["--print-detections"], "action": "store_true", "default": False},
 }
@@ -634,6 +647,67 @@ def normalize_line_width(line_width: float) -> int:
     return max(1, int(round(line_width)))
 
 
+def class_name_for_box(result, cls_id: int) -> str:
+    return result.names.get(cls_id, CLASS_NAMES.get(cls_id, str(cls_id)))
+
+
+def merged_mask_from_polygons(mask_polygons, image_shape):
+    if not mask_polygons:
+        return None
+
+    import numpy as np
+
+    height, width = image_shape[:2]
+    merged = np.zeros((height, width), dtype=np.uint8)
+    for polygon in mask_polygons:
+        points = np.asarray(polygon, dtype=np.int32)
+        if points.size == 0:
+            continue
+        points[:, 0] = np.clip(points[:, 0], 0, width - 1)
+        points[:, 1] = np.clip(points[:, 1], 0, height - 1)
+        cv2.fillPoly(merged, [points], 255)
+
+    if cv2.countNonZero(merged) == 0:
+        return None
+    return merged
+
+
+def binary_mask_center(binary_mask, mode: str) -> tuple[int, int] | None:
+    import numpy as np
+
+    ys, xs = np.where(binary_mask > 0)
+    if len(xs) == 0:
+        return None
+
+    if mode == "bottom":
+        max_y = int(ys.max())
+        bottom_xs = xs[ys >= max_y - 2]
+        return int(round(float(bottom_xs.mean()))), max_y
+
+    moments = cv2.moments(binary_mask, binaryImage=True)
+    if moments["m00"] != 0:
+        center_x = int(round(moments["m10"] / moments["m00"]))
+        center_y = int(round(moments["m01"] / moments["m00"]))
+        return center_x, center_y
+
+    return int(round(float(xs.mean()))), int(round(float(ys.mean())))
+
+
+def draw_center_marker(image, center_x: int, center_y: int, depth_mm=None) -> None:
+    depth_text = f",Z={depth_mm:.0f}mm" if depth_mm is not None else ",Z=?"
+    cv2.circle(image, (center_x, center_y), 4, (0, 0, 255), -1)
+    cv2.putText(
+        image,
+        f"({center_x},{center_y}{depth_text})",
+        (center_x + 6, center_y - 6),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 0, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+
 def draw_detection_centers(
     result,
     image,
@@ -644,10 +718,52 @@ def draw_detection_centers(
     if result.boxes is None:
         return detections
 
+    target_plate_masks = []
+    target_plate_confs = []
+    for index, box in enumerate(result.boxes):
+        cls_id = int(box.cls[0].item())
+        class_name = class_name_for_box(result, cls_id)
+        if class_name != TARGET_PLATE_CLASS:
+            continue
+        mask_points = result_mask_points(result, index)
+        if mask_points is not None:
+            target_plate_masks.append(mask_points)
+            target_plate_confs.append(float(box.conf[0].item()))
+
+    target_plate_exists = bool(target_plate_masks)
+    if target_plate_exists:
+        merged_target_plate_mask = merged_mask_from_polygons(target_plate_masks, image.shape)
+        center = (
+            None
+            if merged_target_plate_mask is None
+            else binary_mask_center(merged_target_plate_mask, "bottom")
+        )
+        if center is not None:
+            center_x, center_y = center
+            depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
+            draw_center_marker(image, center_x, center_y, depth_mm)
+            detections.append(
+                {
+                    "class_id": None,
+                    "class_name": TARGET_PLATE_CLASS,
+                    "confidence": max(target_plate_confs) if target_plate_confs else 0.0,
+                    "center_x": center_x,
+                    "center_y": center_y,
+                    "center_source": "merged_mask",
+                    "depth_mm": depth_mm,
+                }
+            )
+
     for index, box in enumerate(result.boxes):
         cls_id = int(box.cls[0].item())
         conf = float(box.conf[0].item())
         x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
+        class_name = class_name_for_box(result, cls_id)
+        if class_name == TARGET_PLATE_CLASS:
+            continue
+        if target_plate_exists and class_name in SUPPRESSED_WHEN_TARGET_EXISTS:
+            continue
+
         mask_points = result_mask_points(result, index)
         center = None if mask_center_mode == "box" else mask_center(mask_points, mask_center_mode)
         if center is None:
@@ -657,21 +773,9 @@ def draw_detection_centers(
         else:
             center_x, center_y = center
             center_source = "mask"
-        class_name = result.names.get(cls_id, CLASS_NAMES.get(cls_id, str(cls_id)))
         depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
-        depth_text = f",Z={depth_mm:.0f}mm" if depth_mm is not None else ",Z=?"
 
-        cv2.circle(image, (center_x, center_y), 4, (0, 0, 255), -1)
-        cv2.putText(
-            image,
-            f"({center_x},{center_y}{depth_text})",
-            (center_x + 6, center_y - 6),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 255),
-            1,
-            cv2.LINE_AA,
-        )
+        draw_center_marker(image, center_x, center_y, depth_mm)
         detections.append(
             {
                 "class_id": cls_id,
@@ -800,19 +904,39 @@ class TkinterDisplay:
             pass
 
 
-def create_display(args: argparse.Namespace):
+def resolve_window_size(args: argparse.Namespace, image_shape=None) -> tuple[int, int]:
+    image_height = args.height
+    image_width = args.width
+    if image_shape is not None:
+        image_height, image_width = image_shape[:2]
+
+    if args.window_width is None:
+        width = args.imgsz
+    else:
+        width = args.window_width
+
+    if args.window_height is None:
+        height = int(round(width * image_height / max(1, image_width)))
+    else:
+        height = args.window_height
+
+    return max(1, int(width)), max(1, int(height))
+
+
+def create_display(args: argparse.Namespace, image_shape=None):
     title = "YOLO Camera Detect"
     backend = args.display_backend
+    window_width, window_height = resolve_window_size(args, image_shape)
     if backend == "opencv":
         return OpenCvDisplay(title)
     if backend == "tkinter":
-        return TkinterDisplay(title, args.window_width, args.window_height, args.resize_to_window)
+        return TkinterDisplay(title, window_width, window_height, args.resize_to_window)
 
     try:
         return OpenCvDisplay(title)
     except cv2.error:
         print("[WARN] OpenCV window is unavailable, falling back to Tkinter display.")
-        return TkinterDisplay(title, args.window_width, args.window_height, args.resize_to_window)
+        return TkinterDisplay(title, window_width, window_height, args.resize_to_window)
 
 
 def main() -> None:
@@ -854,19 +978,19 @@ def main() -> None:
     print("[OK] Press q or Esc to quit. Press s to save a snapshot.")
 
     try:
-        if not args.no_window:
-            try:
-                display = create_display(args)
-            except (RuntimeError, cv2.error) as exc:
-                print(f"[ERROR] Display window is unavailable: {exc}")
-                print("[HINT] Use --no-window --save-video to run without GUI display.")
-                return
-
         while True:
             ok, frame = capture.read()
             if not ok or frame is None:
                 print("[WARN] Failed to read a frame from camera.")
                 break
+
+            if display is None and not args.no_window:
+                try:
+                    display = create_display(args, frame.shape)
+                except (RuntimeError, cv2.error) as exc:
+                    print(f"[ERROR] Display window is unavailable: {exc}")
+                    print("[HINT] Use --no-window --save-video to run without GUI display.")
+                    return
 
             frame_id += 1
             stats_text = frame_stats_text(frame)
@@ -896,6 +1020,8 @@ def main() -> None:
                 annotated = result.plot(
                     line_width=normalize_line_width(args.line_width),
                     masks=args.draw_masks,
+                    boxes=args.draw_boxes,
+                    labels=args.draw_labels,
                 )
                 detections = draw_detection_centers(
                     result,

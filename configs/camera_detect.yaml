@@ -48,12 +48,15 @@ device: "0"  # 推理设备；"0"=第一块 CUDA GPU，"cpu"=CPU
 max_det: 100  # 每帧最多保留检测框数量；孔很多时可调大
 line_width: 1  # 检测框线宽；显示太粗/太细时调整
 draw_masks: true  # 分割模型是否绘制 mask；true=显示分割区域，false=只显示框和中心点
+draw_boxes: true  # 是否绘制检测框；分割对准只看 mask 时可设为 false
+draw_labels: true  # 是否绘制类别名和置信度；只看分割和红色目标点时可设为 false
 mask_center_mode: centroid  # 分割中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
 
 # 显示和输出配置。
 display_backend: tkinter  # 窗口显示后端；tkinter兼容opencv-python-headless，opencv需要GUI版OpenCV
 window_width: 1600  # Tkinter 窗口初始宽度，单位像素；想更大就调大
 window_height: 900  # Tkinter 窗口初始高度，单位像素；16:9 屏幕可用 1600x900 或 1920x1080
+# window_width/window_height 也可以设为 auto；auto 时窗口宽度跟随 imgsz，高度按相机画面比例计算
 resize_to_window: true  # 是否让画面随窗口大小缩放；true=拖大/全屏后画面跟着放大，false=原始大小
 no_window: false  # 是否禁用显示窗口；true=不弹窗口，适合只保存视频或后台运行
 save_video: null  # 识别视频保存路径；null=不保存，示例 data/reports/hole_detect_v1/camera_detect.mp4
