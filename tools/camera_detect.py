@@ -75,6 +75,8 @@ ARG_SPECS = {
     "conf": {"flags": ["--conf"], "type": float, "default": 0.25},
     "iou": {"flags": ["--iou"], "type": float, "default": 0.45},
     "device": {"flags": ["--device"], "default": "0"},
+    "half": {"flags": ["--half"], "type": str_to_bool, "default": False},
+    "infer_stride": {"flags": ["--infer-stride"], "type": int, "default": 1},
     "width": {"flags": ["--width"], "type": int, "default": 1280},
     "height": {"flags": ["--height"], "type": int, "default": 720},
     "fps": {"flags": ["--fps"], "type": float, "default": 30.0},
@@ -1147,11 +1149,15 @@ def main() -> None:
     frame_id = 0
     started_at = time.time()
     warned_depth_unaligned = False
+    last_instances: list[dict[str, object]] = []
+    infer_stride = max(1, args.infer_stride)
+    use_half = bool(args.half and str(args.device).lower() != "cpu")
 
     if args.preview_only:
         print("[OK] Preview only: YOLO model is not loaded.")
     else:
         print(f"[OK] Model: {model_path}")
+        print(f"[OK] Inference: imgsz={args.imgsz}, half={use_half}, infer_stride={infer_stride}")
     if args.camera_source == "orbbec":
         print(f"[OK] Camera: Orbbec COLOR_SENSOR via SDK {args.orbbec_sdk_dir}")
         if not args.disable_depth:
@@ -1192,28 +1198,36 @@ def main() -> None:
                     )
                     warned_depth_unaligned = True
 
-                result = model.predict(
-                    source=frame,
-                    imgsz=args.imgsz,
-                    conf=max(args.conf, args.conf_thres),
-                    iou=args.iou,
-                    device=args.device,
-                    max_det=args.max_det,
-                    verbose=False,
-                )[0]
-                instances = filtered_instances(result, frame.shape, args)
+                should_infer = frame_id == 1 or (frame_id - 1) % infer_stride == 0
+                if should_infer:
+                    result = model.predict(
+                        source=frame,
+                        imgsz=args.imgsz,
+                        conf=max(args.conf, args.conf_thres),
+                        iou=args.iou,
+                        device=args.device,
+                        half=use_half,
+                        max_det=args.max_det,
+                        verbose=False,
+                    )[0]
+                    last_instances = filtered_instances(result, frame.shape, args)
+
+                instances = last_instances
                 annotated = draw_filtered_instances(frame, instances, args)
                 stats_text = depth_summary_text(instances, depth_for_lookup)
-                detections = draw_detection_centers(
-                    instances,
-                    annotated,
-                    depth_for_lookup,
-                    mask_center_mode=args.mask_center_mode,
-                    draw_centers=args.draw_centers,
-                    target_plate_morph_kernel=args.target_plate_morph_kernel,
-                    target_plate_morph_open=args.target_plate_morph_open,
-                    target_plate_morph_close=args.target_plate_morph_close,
-                )
+                if args.draw_centers or args.print_detections:
+                    detections = draw_detection_centers(
+                        instances,
+                        annotated,
+                        depth_for_lookup,
+                        mask_center_mode=args.mask_center_mode,
+                        draw_centers=args.draw_centers,
+                        target_plate_morph_kernel=args.target_plate_morph_kernel,
+                        target_plate_morph_open=args.target_plate_morph_open,
+                        target_plate_morph_close=args.target_plate_morph_close,
+                    )
+                else:
+                    detections = []
 
             elapsed = max(time.time() - started_at, 1e-6)
             fps_text = f"FPS: {frame_id / elapsed:.1f}"
