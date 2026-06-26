@@ -47,6 +47,8 @@ iou: 0.45  # NMS IoU 阈值；控制重叠框合并，常用 0.45
 device: "0"  # 推理设备；"0"=第一块 CUDA GPU，"cpu"=CPU
 max_det: 100  # 每帧最多保留检测框数量；孔很多时可调大
 line_width: 1  # 检测框线宽；显示太粗/太细时调整
+draw_masks: true  # 分割模型是否绘制 mask；true=显示分割区域，false=只显示框和中心点
+mask_center_mode: centroid  # 分割中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
 
 # 显示和输出配置。
 display_backend: tkinter  # 窗口显示后端；tkinter兼容opencv-python-headless，opencv需要GUI版OpenCV

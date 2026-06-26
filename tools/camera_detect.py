@@ -88,7 +88,13 @@ ARG_SPECS = {
     "orbbec_ir_exposure": {"flags": ["--orbbec-ir-exposure"], "type": int, "default": None},
     "orbbec_ir_gain": {"flags": ["--orbbec-ir-gain"], "type": int, "default": None},
     "max_det": {"flags": ["--max-det"], "type": int, "default": 100},
-    "line_width": {"flags": ["--line-width"], "type": int, "default": 2},
+    "line_width": {"flags": ["--line-width"], "type": float, "default": 2.0},
+    "draw_masks": {"flags": ["--draw-masks"], "type": str_to_bool, "default": True},
+    "mask_center_mode": {
+        "flags": ["--mask-center-mode"],
+        "choices": ["centroid", "bottom", "box"],
+        "default": "centroid",
+    },
     "save_video": {"flags": ["--save-video"], "type": Path, "default": None},
     "snapshot_dir": {
         "flags": ["--snapshot-dir"],
@@ -593,17 +599,60 @@ def prepare_depth_for_lookup(depth_image, image_shape, aligned_to_color: bool):
     return cv2.resize(depth_image, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
 
 
-def draw_detection_centers(result, image, depth_image=None) -> list[dict[str, object]]:
+def mask_center(mask_points, mode: str) -> tuple[int, int] | None:
+    if mask_points is None or len(mask_points) == 0:
+        return None
+
+    import numpy as np
+
+    points = np.asarray(mask_points, dtype="float32")
+    if mode == "bottom":
+        max_y = points[:, 1].max()
+        bottom_points = points[points[:, 1] >= max_y - 2.0]
+        center_x = int(round(float(bottom_points[:, 0].mean())))
+        center_y = int(round(float(max_y)))
+        return center_x, center_y
+
+    moments = cv2.moments(points)
+    if moments["m00"] != 0:
+        center_x = int(round(moments["m10"] / moments["m00"]))
+        center_y = int(round(moments["m01"] / moments["m00"]))
+        return center_x, center_y
+
+    center_x = int(round(float(points[:, 0].mean())))
+    center_y = int(round(float(points[:, 1].mean())))
+    return center_x, center_y
+
+
+def result_mask_points(result, index: int):
+    if result.masks is None or result.masks.xy is None or index >= len(result.masks.xy):
+        return None
+    return result.masks.xy[index]
+
+
+def draw_detection_centers(
+    result,
+    image,
+    depth_image=None,
+    mask_center_mode: str = "centroid",
+) -> list[dict[str, object]]:
     detections: list[dict[str, object]] = []
     if result.boxes is None:
         return detections
 
-    for box in result.boxes:
+    for index, box in enumerate(result.boxes):
         cls_id = int(box.cls[0].item())
         conf = float(box.conf[0].item())
         x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
-        center_x = int(round((x1 + x2) / 2.0))
-        center_y = int(round((y1 + y2) / 2.0))
+        mask_points = result_mask_points(result, index)
+        center = None if mask_center_mode == "box" else mask_center(mask_points, mask_center_mode)
+        if center is None:
+            center_x = int(round((x1 + x2) / 2.0))
+            center_y = int(round((y1 + y2) / 2.0))
+            center_source = "box"
+        else:
+            center_x, center_y = center
+            center_source = "mask"
         class_name = result.names.get(cls_id, CLASS_NAMES.get(cls_id, str(cls_id)))
         depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
         depth_text = f",Z={depth_mm:.0f}mm" if depth_mm is not None else ",Z=?"
@@ -626,6 +675,7 @@ def draw_detection_centers(result, image, depth_image=None) -> list[dict[str, ob
                 "confidence": conf,
                 "center_x": center_x,
                 "center_y": center_y,
+                "center_source": center_source,
                 "depth_mm": depth_mm,
             }
         )
@@ -642,7 +692,12 @@ def print_detections(frame_id: int, detections: list[dict[str, object]]) -> None
     for det in detections:
         depth = det["depth_mm"]
         depth_text = f" z={depth:.0f}mm" if depth is not None else " z=?"
-        items.append("{class_name} conf={confidence:.3f} center=({center_x},{center_y})".format(**det) + depth_text)
+        source_text = f" source={det['center_source']}"
+        items.append(
+            "{class_name} conf={confidence:.3f} center=({center_x},{center_y})".format(**det)
+            + depth_text
+            + source_text
+        )
     print(f"[FRAME {frame_id}] " + " | ".join(items))
 
 
@@ -834,8 +889,13 @@ def main() -> None:
                     max_det=args.max_det,
                     verbose=False,
                 )[0]
-                annotated = result.plot(line_width=args.line_width)
-                detections = draw_detection_centers(result, annotated, depth_for_lookup)
+                annotated = result.plot(line_width=args.line_width, masks=args.draw_masks)
+                detections = draw_detection_centers(
+                    result,
+                    annotated,
+                    depth_for_lookup,
+                    mask_center_mode=args.mask_center_mode,
+                )
 
             elapsed = max(time.time() - started_at, 1e-6)
             fps_text = f"FPS: {frame_id / elapsed:.1f}"
