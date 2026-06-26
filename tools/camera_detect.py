@@ -604,6 +604,20 @@ def lookup_depth_mm(depth_image, center_x: int, center_y: int) -> float | None:
     return depth_mm
 
 
+def mean_depth_for_mask(depth_image, binary_mask) -> float | None:
+    if depth_image is None or binary_mask is None:
+        return None
+    if depth_image.shape[:2] != binary_mask.shape[:2]:
+        return None
+
+    import numpy as np
+
+    values = depth_image[(binary_mask > 0) & (depth_image > 0)]
+    if values.size == 0:
+        return None
+    return float(np.mean(values))
+
+
 def prepare_depth_for_lookup(depth_image, image_shape, aligned_to_color: bool):
     if depth_image is None:
         return None
@@ -958,6 +972,27 @@ def print_detections(frame_id: int, detections: list[dict[str, object]]) -> None
     print(f"[FRAME {frame_id}] " + " | ".join(items))
 
 
+def depth_summary_text(instances: list[dict[str, object]], depth_image) -> str:
+    class_order = [TARGET_PLATE_CLASS, "screwdriver_tip"]
+    parts = []
+    for class_name in class_order:
+        class_masks = [instance["mask"] for instance in instances if instance["class_name"] == class_name]
+        if not class_masks:
+            parts.append(f"{class_name}: --")
+            continue
+
+        import numpy as np
+
+        merged_mask = np.zeros(class_masks[0].shape[:2], dtype=np.uint8)
+        for binary_mask in class_masks:
+            merged_mask = cv2.bitwise_or(merged_mask, binary_mask)
+        mean_depth = mean_depth_for_mask(depth_image, merged_mask)
+        depth_text = f"{mean_depth:.0f}mm" if mean_depth is not None else "?"
+        parts.append(f"{class_name}: {depth_text}")
+
+    return "Depth avg  " + " | ".join(parts)
+
+
 def save_snapshot(snapshot_dir: Path, image) -> Path:
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -1142,7 +1177,7 @@ def main() -> None:
                     return
 
             frame_id += 1
-            stats_text = frame_stats_text(frame)
+            stats_text = "Depth avg  target_plate: -- | screwdriver_tip: --"
             if args.preview_only:
                 annotated = frame.copy()
                 detections = []
@@ -1168,6 +1203,7 @@ def main() -> None:
                 )[0]
                 instances = filtered_instances(result, frame.shape, args)
                 annotated = draw_filtered_instances(frame, instances, args)
+                stats_text = depth_summary_text(instances, depth_for_lookup)
                 detections = draw_detection_centers(
                     instances,
                     annotated,
