@@ -109,6 +109,17 @@ ARG_SPECS = {
     "target_plate_morph_kernel": {"flags": ["--target-plate-morph-kernel"], "type": int, "default": 3},
     "target_plate_morph_open": {"flags": ["--target-plate-morph-open"], "type": int, "default": 1},
     "target_plate_morph_close": {"flags": ["--target-plate-morph-close"], "type": int, "default": 1},
+    "target_plate_top_width_mm": {"flags": ["--target-plate-top-width-mm"], "type": float, "default": 40.0},
+    "target_plate_height_to_bottom_center_mm": {
+        "flags": ["--target-plate-height-to-bottom-center-mm"],
+        "type": float,
+        "default": 25.0,
+    },
+    "target_plate_use_template_bottom_center": {
+        "flags": ["--target-plate-use-template-bottom-center"],
+        "type": str_to_bool,
+        "default": True,
+    },
     "mask_center_mode": {
         "flags": ["--mask-center-mode"],
         "choices": ["centroid", "bottom", "box"],
@@ -195,12 +206,37 @@ def coerce_config_value(dest: str, value):
     return value
 
 
+def expand_config(config: dict[str, object], config_path: Path) -> dict[str, object]:
+    expanded = dict(config)
+    template = expanded.pop("target_plate_template", None)
+    if template is None:
+        return expanded
+    if not isinstance(template, dict):
+        raise SystemExit(f"[ERROR] target_plate_template must be a YAML mapping: {config_path}")
+
+    mapping = {
+        "top_width_mm": "target_plate_top_width_mm",
+        "height_to_bottom_center_mm": "target_plate_height_to_bottom_center_mm",
+        "use_template_bottom_center": "target_plate_use_template_bottom_center",
+    }
+    unknown_template_keys = sorted(set(template) - set(mapping))
+    if unknown_template_keys:
+        raise SystemExit(
+            "[ERROR] Unknown target_plate_template keys in "
+            f"{config_path}: {', '.join(unknown_template_keys)}"
+        )
+    for source_key, dest_key in mapping.items():
+        if source_key in template:
+            expanded[dest_key] = template[source_key]
+    return expanded
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cli_args, defaults = parse_cli_args(argv)
     values = vars(defaults).copy()
 
     if not cli_args.no_config:
-        config = load_yaml_config(cli_args.config)
+        config = expand_config(load_yaml_config(cli_args.config), cli_args.config)
         unknown_keys = sorted(set(config) - set(ARG_SPECS))
         if unknown_keys:
             raise SystemExit(f"[ERROR] Unknown config keys in {cli_args.config}: {', '.join(unknown_keys)}")
@@ -784,6 +820,74 @@ def binary_mask_center(binary_mask, mode: str) -> tuple[int, int] | None:
     return int(round(float(xs.mean()))), int(round(float(ys.mean())))
 
 
+def template_bottom_center(
+    binary_mask,
+    top_width_mm: float,
+    height_to_bottom_center_mm: float,
+) -> tuple[int, int] | None:
+    if top_width_mm <= 0:
+        return None
+
+    import numpy as np
+
+    ys, xs = np.where(binary_mask > 0)
+    if len(xs) < 2:
+        return None
+
+    top_points = []
+    for x in np.unique(xs):
+        column_ys = ys[xs == x]
+        if len(column_ys) == 0:
+            continue
+        top_points.append((float(x), float(column_ys.min())))
+    if len(top_points) < 2:
+        return None
+
+    points = np.asarray(top_points, dtype=np.float32)
+    top_y_values = points[:, 1]
+    upper_limit = float(np.percentile(top_y_values, 70))
+    fit_points = points[top_y_values <= upper_limit]
+    if len(fit_points) < 2:
+        fit_points = points
+
+    x_left = float(fit_points[:, 0].min())
+    x_right = float(fit_points[:, 0].max())
+    if x_right <= x_left:
+        return None
+
+    slope, intercept = np.polyfit(fit_points[:, 0], fit_points[:, 1], 1)
+    y_left = float(slope * x_left + intercept)
+    y_right = float(slope * x_right + intercept)
+
+    top_width_px = float(np.hypot(x_right - x_left, y_right - y_left))
+    if top_width_px <= 0:
+        return None
+
+    top_center_x = (x_left + x_right) / 2.0
+    top_center_y = (y_left + y_right) / 2.0
+    height_px = top_width_px * height_to_bottom_center_mm / top_width_mm
+
+    line_dx = x_right - x_left
+    line_dy = y_right - y_left
+    normal_x = -line_dy
+    normal_y = line_dx
+    normal_length = float(np.hypot(normal_x, normal_y))
+    if normal_length <= 0:
+        return None
+    normal_x /= normal_length
+    normal_y /= normal_length
+    if normal_y < 0:
+        normal_x = -normal_x
+        normal_y = -normal_y
+
+    center_x = int(round(top_center_x + normal_x * height_px))
+    center_y = int(round(top_center_y + normal_y * height_px))
+    height, width = binary_mask.shape[:2]
+    center_x = max(0, min(width - 1, center_x))
+    center_y = max(0, min(height - 1, center_y))
+    return center_x, center_y
+
+
 def draw_center_marker(image, center_x: int, center_y: int, depth_mm=None) -> None:
     depth_text = f",Z={depth_mm:.0f}mm" if depth_mm is not None else ",Z=?"
     cv2.circle(image, (center_x, center_y), 4, (0, 0, 255), -1)
@@ -851,6 +955,9 @@ def draw_detection_centers(
     target_plate_morph_kernel: int = 3,
     target_plate_morph_open: int = 1,
     target_plate_morph_close: int = 1,
+    target_plate_top_width_mm: float = 40.0,
+    target_plate_height_to_bottom_center_mm: float = 25.0,
+    target_plate_use_template_bottom_center: bool = True,
 ) -> list[dict[str, object]]:
     detections: list[dict[str, object]] = []
     if not instances:
@@ -877,11 +984,18 @@ def draw_detection_centers(
             target_plate_morph_open,
             target_plate_morph_close,
         )
-        center = (
-            None
-            if cv2.countNonZero(merged_target_plate_mask) == 0
-            else binary_mask_center(merged_target_plate_mask, "bottom")
-        )
+        center = None
+        center_source = "merged_mask"
+        if cv2.countNonZero(merged_target_plate_mask) > 0:
+            if target_plate_use_template_bottom_center:
+                center = template_bottom_center(
+                    merged_target_plate_mask,
+                    target_plate_top_width_mm,
+                    target_plate_height_to_bottom_center_mm,
+                )
+                center_source = "template_bottom_center" if center is not None else center_source
+            if center is None:
+                center = binary_mask_center(merged_target_plate_mask, "bottom")
         if center is not None:
             center_x, center_y = center
             depth_mm = lookup_depth_mm(depth_image, center_x, center_y)
@@ -893,7 +1007,7 @@ def draw_detection_centers(
                     "confidence": max(target_plate_confs) if target_plate_confs else 0.0,
                     "center_x": center_x,
                     "center_y": center_y,
-                    "center_source": "merged_mask",
+                    "center_source": center_source,
                     "depth_mm": depth_mm,
                 }
             )
@@ -1171,6 +1285,9 @@ def main() -> None:
                     target_plate_morph_kernel=args.target_plate_morph_kernel,
                     target_plate_morph_open=args.target_plate_morph_open,
                     target_plate_morph_close=args.target_plate_morph_close,
+                    target_plate_top_width_mm=args.target_plate_top_width_mm,
+                    target_plate_height_to_bottom_center_mm=args.target_plate_height_to_bottom_center_mm,
+                    target_plate_use_template_bottom_center=args.target_plate_use_template_bottom_center,
                 )
 
             elapsed = max(time.time() - started_at, 1e-6)

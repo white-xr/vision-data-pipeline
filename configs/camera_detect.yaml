@@ -48,14 +48,18 @@ device: "0"  # 推理设备；"0"=第一块 CUDA GPU，"cpu"=CPU
 max_det: 100  # 每帧最多保留检测框数量；孔很多时可调大
 line_width: 1  # 检测框线宽；显示太粗/太细时调整
 draw_masks: true  # 分割模型是否绘制 mask；true=显示分割区域，false=只显示框和中心点
-draw_boxes: true  # 是否绘制检测框；分割对准只看 mask 时可设为 false
-draw_labels: true  # 是否绘制类别名和置信度；只看分割和红色目标点时可设为 false
+draw_boxes: false  # 是否绘制检测框；分割对准只看 mask 时建议 false
+draw_labels: false  # 是否绘制类别名和置信度；只看分割和红色目标点时建议 false
 conf_thres: 0.35  # 后处理置信度阈值；低于该值的 mask 不参与显示、合并和目标点计算
 target_plate_min_area: 200  # target_plate 最小 mask 像素面积；太小视为噪声丢弃
 screwdriver_tip_min_area: 100  # screwdriver_tip 最小 mask 像素面积；太小视为噪声丢弃
 target_plate_morph_kernel: 3  # target_plate 合并 mask 形态学核大小；推荐 3 或 5，过大会补过头
 target_plate_morph_open: 1  # target_plate 合并 mask 开运算次数；用于去小噪点，0=关闭
 target_plate_morph_close: 1  # target_plate 合并 mask 闭运算次数；用于补小空洞，0=关闭
+target_plate_template:
+  top_width_mm: 40.0  # target_plate 上边真实宽度，单位 mm
+  height_to_bottom_center_mm: 25.0  # 上边中心到底部中心的真实垂直高度，单位 mm
+  use_template_bottom_center: true  # true=用几何模板估计底部中心，false=退回合并 mask 底部中心
 mask_center_mode: centroid  # 分割中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
 
 # 显示和输出配置。
