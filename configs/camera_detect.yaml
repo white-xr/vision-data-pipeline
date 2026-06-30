@@ -1,5 +1,5 @@
 # 通用相机实时识别配置；运行命令：python tools/camera_detect.py
-# 换模型时通常只改 model、task、classes、imgsz、conf、draw。
+# 换模型时通常只改 model、task、classes、imgsz、conf、draw、draw_centers。
 
 camera:                   # 相机配置；当前项目主要使用奥比中光 335L/305
   source: orbbec          # 相机来源；orbbec=奥比中光 SDK，opencv=普通 USB/RTSP/HTTP
@@ -19,6 +19,8 @@ half: true                 # 是否使用半精度推理；CUDA 建议 true，CP
 max_det: 3                 # 每帧最多保留目标数量；目标多时调大
 
 draw: segment              # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
+draw_centers: true         # 是否绘制红色中心点和坐标；true=显示，false=隐藏
+center_mode: centroid      # 中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
 
 display:                   # 显示窗口配置
   backend: tkinter         # 显示后端；tkinter 兼容性好，opencv 依赖 GUI 版 OpenCV
