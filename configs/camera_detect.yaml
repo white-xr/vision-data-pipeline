@@ -1,78 +1,28 @@
-# 相机实时识别运行配置。
-# 启动命令：
-#   python tools/camera_detect.py
+# 通用相机实时识别配置；运行命令：python tools/camera_detect.py
+# 换模型时通常只改 model、task、classes、imgsz、conf、draw。
 
-# YOLO 模型配置。
-model: runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt  # YOLO 权重路径；默认使用当前孔位检测 best.pt
+camera:                   # 相机配置；当前项目主要使用奥比中光 335L/305
+  source: orbbec          # 相机来源；orbbec=奥比中光 SDK，opencv=普通 USB/RTSP/HTTP
+  width: 960              # 请求彩色图宽度；实际值以相机支持的 profile 为准
+  height: 600             # 请求彩色图高度；实际值以相机支持的 profile 为准
+  fps: 30.0               # 请求帧率；实际帧率由相机、USB 带宽和推理速度共同决定
 
-# 相机来源配置。
-camera_source: orbbec  # 相机来源；orbbec=奥比中光RGB-D相机，opencv=普通USB/RTSP/HTTP相机
+model: data\models\Base_Cover.pt  # 模型权重路径；换模型主要改这一行
+task: auto                 # 模型任务类型；auto=自动判断，detect=检测，segment=分割
+classes: null              # 类别名文件；需要固定类别名时填 configs/classes.txt，否则用模型自带 names
 
-# OpenCV 相机配置，仅当 camera_source: opencv 时生效。
-camera_index: 0  # 本机 USB 相机编号；常见为 0/1/2，仅 camera_url 为空时使用
-camera_url: null  # 网络相机地址；RTSP/HTTP URL，填入后会优先于 camera_index
-backend: auto  # OpenCV 采集后端；auto/dshow/msmf/any/obsensor，Windows 本机相机建议 dshow
-read_retries: 30  # 读取首帧重试次数；相机启动慢时可调大
-opencv_auto_exposure: null  # OpenCV 自动曝光；null=不改，true=自动，false=手动
-opencv_exposure: null  # OpenCV 手动曝光值；null=不改，不同相机/后端单位不同，DirectShow 常见为负数档位
-opencv_gain: null  # OpenCV 增益值；null=不改，不同相机/后端范围不同
+imgsz: 960                 # YOLO 推理输入尺寸；越大越准但越慢、越吃显存
+conf: 0.6                  # 置信度阈值；越高误检越少，但可能漏检
+iou: 0.45                  # NMS IoU 阈值；控制重叠检测结果的合并
+device: "0"                # 推理设备；"0"=第一张 CUDA GPU，"cpu"=CPU
+half: true                 # 是否使用半精度推理；CUDA 建议 true，CPU 会自动忽略
+max_det: 3                 # 每帧最多保留目标数量；目标多时调大
 
-# 奥比中光 SDK 配置，仅当 camera_source: orbbec 时生效。
-orbbec_sdk_dir: D:/OrbbecSDK_v2  # 奥比中光 SDK 根目录；脚本会从其 bin/ 下加载 DLL
-orbbec_format: RGB  # 彩色流格式；RGB/MJPG/YUYV/UYVY/NV12/NV21/I420/default，优先用 RGB
-orbbec_depth_align: sw  # 深度对齐模式；sw=软件深度对齐到彩色，hw=硬件对齐，disable=不对齐
-disable_depth: false  # 是否关闭深度流；false=显示 Z 深度，true=只显示 2D 像素中心
-orbbec_timeout_ms: 1000  # 等待 Orbbec 帧超时时间，单位毫秒；网络/USB不稳时可调大
-orbbec_color_auto_exposure: null  # 彩色相机自动曝光；null=不改，true=自动曝光，false=手动曝光
-orbbec_color_exposure: null  # 彩色相机手动曝光值；null=不改，需先把 orbbec_color_auto_exposure 设为 false
-orbbec_color_gain: null  # 彩色相机增益；null=不改，值越大越亮但噪声更多
-orbbec_color_ae_max_exposure: null  # 彩色自动曝光最大曝光值；null=不改，仅自动曝光时通常有效
-orbbec_color_ae_max_gain: null  # 彩色自动曝光最大增益；null=不改，仅自动曝光时通常有效
-orbbec_depth_auto_exposure: null  # 深度相机自动曝光；null=不改，true=自动曝光，false=手动曝光
-orbbec_depth_exposure: null  # 深度相机手动曝光值；null=不改，需先把 orbbec_depth_auto_exposure 设为 false
-orbbec_depth_gain: null  # 深度相机增益；null=不改，影响深度/IR成像质量
-orbbec_ir_auto_exposure: null  # IR 相机自动曝光；null=不改，true=自动曝光，false=手动曝光
-orbbec_ir_exposure: null  # IR 相机手动曝光值；null=不改，需先把 orbbec_ir_auto_exposure 设为 false
-orbbec_ir_gain: null  # IR 相机增益；null=不改，值越大越亮但噪声更多
+draw: segment              # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
 
-# 相机流请求参数。
-width: 1280  # 请求彩色图宽度，单位像素；实际分辨率以相机支持的 profile 为准
-height: 720  # 请求彩色图高度，单位像素；实际分辨率以相机支持的 profile 为准
-fps: 30.0  # 请求帧率；实际帧率以相机和推理速度为准
+display:                   # 显示窗口配置
+  backend: tkinter         # 显示后端；tkinter 兼容性好，opencv 依赖 GUI 版 OpenCV
+  resize_to_window: false  # 是否随窗口缩放画面；false=按相机原始尺寸显示
 
-# YOLO 推理参数。
-imgsz: 1280  # YOLO 推理输入尺寸；小孔检测建议 1280，显存不足可降到 960
-conf: 0.50  # 置信度阈值；越高误检越少但可能漏检，常用 0.4-0.7
-iou: 0.45  # NMS IoU 阈值；控制重叠框合并，常用 0.45
-device: "0"  # 推理设备；"0"=第一块 CUDA GPU，"cpu"=CPU
-half: false  # CUDA 半精度推理；true=更快更省显存，CPU 会自动忽略
-infer_stride: 1  # 推理间隔；1=每帧推理，2=每2帧推理一次并复用上一帧 mask
-max_det: 100  # 每帧最多保留检测框数量；孔很多时可调大
-line_width: 1  # 检测框线宽；显示太粗/太细时调整
-draw_masks: true  # 分割模型是否绘制 mask；true=显示分割区域，false=只显示框和中心点
-draw_boxes: false  # 是否绘制检测框；分割对准只看 mask 时建议 false
-draw_labels: false  # 是否绘制类别名和置信度；只看分割和红色目标点时建议 false
-draw_centers: true  # 是否绘制中心/底部红点和坐标；false=只显示分割 mask
-conf_thres: 0.35  # 后处理置信度阈值；低于该值的 mask 不参与显示、合并和目标点计算
-target_plate_min_area: 200  # target_plate 最小 mask 像素面积；太小视为噪声丢弃
-screwdriver_tip_min_area: 100  # screwdriver_tip 最小 mask 像素面积；太小视为噪声丢弃
-target_plate_morph_kernel: 3  # target_plate 合并 mask 形态学核大小；推荐 3 或 5，过大会补过头
-target_plate_morph_open: 1  # target_plate 合并 mask 开运算次数；用于去小噪点，0=关闭
-target_plate_morph_close: 1  # target_plate 合并 mask 闭运算次数；用于补小空洞，0=关闭
-mask_center_mode: centroid  # 分割中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
-
-# 显示和输出配置。
-display_backend: tkinter  # 窗口显示后端；tkinter兼容opencv-python-headless，opencv需要GUI版OpenCV
-window_width: auto  # Tkinter 窗口初始宽度；auto=不缩放时跟随相机原始宽度，缩放时跟随 imgsz
-window_height: auto  # Tkinter 窗口初始高度；auto=按相机画面比例自动计算，避免画面被裁
-# window_width/window_height 设为 auto 时，会根据 resize_to_window 自动选择原始帧尺寸或 imgsz 缩放尺寸
-resize_to_window: true  # 是否让画面随窗口大小缩放；true=拖大/全屏后画面跟着放大，false=原始大小
-no_window: false  # 是否禁用显示窗口；true=不弹窗口，适合只保存视频或后台运行
-save_video: null  # 识别视频保存路径；null=不保存，示例 data/reports/hole_detect_v1/camera_detect.mp4
-snapshot_dir: data/reports/hole_detect_v1/camera_snapshots  # 按 s 保存截图的目录
-
-# 调试开关。
-preview_only: false  # 只预览相机画面；true=不加载YOLO，用于确认RGB/深度相机画面是否正常
-print_frame_stats: false  # 打印亮度统计；true=每帧输出 min/max/mean，用于排查黑屏/曝光
-print_detections: false  # 打印检测结果；true=每帧输出类别、置信度、中心点和Z深度
-list_cameras: false  # 扫描 OpenCV 相机编号；true=扫描后退出，仅 camera_source: opencv 排查时使用
+output:                    # 输出配置
+  snapshot_dir: data/reports/camera_snapshots  # 按 s 保存截图的目录

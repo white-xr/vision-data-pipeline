@@ -195,13 +195,9 @@ AnyLabeling 标注边缘安装孔
 
 ## 相机实时识别
 
-训练完成后，可以使用 `tools/camera_detect.py` 接入本机相机或网络相机实时识别边缘安装孔。脚本默认加载当前训练得到的模型：
+通用实时识别入口是 `tools/camera_detect.py`，可接入奥比中光 RGB-D 相机、普通 USB 相机或 RTSP/HTTP 视频流，并自动兼容 YOLO 检测模型和分割模型。
 
-```text
-runs/detect/data/models/hole_detect_v1/yolo11n_1280_v1/weights/best.pt
-```
-
-默认配置文件：
+默认配置文件是：
 
 ```text
 configs/camera_detect.yaml
@@ -213,34 +209,42 @@ configs/camera_detect.yaml
 python tools/camera_detect.py
 ```
 
-常用参数都写在 `configs/camera_detect.yaml` 中，包括模型路径、相机类型、Orbbec SDK 路径、深度对齐方式、置信度、推理尺寸、显示窗口和调试开关。日常使用只需要修改这份配置文件。
-曝光、增益、自动曝光上限等相机控制参数也在这份配置里，默认 `null` 表示不修改相机当前设置。
+运行前检查配置、模型路径和后处理插件：
 
-当前默认配置使用奥比中光 RGB-D 相机、Tkinter 显示窗口、软件 depth-to-color 对齐，并显示检测中心的深度 `Z`。奥比中光相机不要用普通 OpenCV 编号读取，否则可能拿到深度、红外或空流。
+```bash
+python tools/camera_detect.py --dry-run
+```
 
-首次使用 Orbbec 模式前，请安装 Orbbec Python wrapper：
+只预览相机、不加载模型：
+
+```bash
+python tools/camera_detect.py --preview-only
+```
+
+扫描相机：
+
+```bash
+python tools/camera_detect.py --list-cameras
+```
+
+`configs/camera_detect.yaml` 是当前要运行的模型配置。日常换模型通常只改 `model`、`task`、`imgsz`、`conf`、`draw` 和可选 `classes/postprocess`，不需要改 Python 代码。
+
+奥比中光 335L/305 默认走 `camera.source: orbbec`。首次使用 Orbbec 模式前安装：
 
 ```bash
 python -m pip install --no-deps pyorbbecsdk2
 ```
 
-这里使用 `--no-deps` 是为了避免 `pyorbbecsdk2` 自动升级 `numpy`，破坏 AnyLabeling、onnxruntime 和当前 YOLO 环境。
-
-如果只想看原始相机画面、不跑模型，把 `configs/camera_detect.yaml` 中的 `preview_only` 改为 `true`。如果要排查黑屏，把 `print_frame_stats` 改为 `true`，窗口左上角的 `min/max/mean` 会显示原始帧亮度范围。
-
-Orbbec 模式默认同时开启深度流，并使用软件 depth-to-color 对齐。检测结果中的红色坐标会显示：
-
-```text
-(x,y,Z=1234mm)
-```
-
-其中 `x,y` 是 RGB 图像中的孔中心像素坐标，`Z` 是该中心点对应的深度值，单位为毫米。如果显示 `Z=?`，通常表示该点深度无效、深度帧未对齐到彩色帧，或者该像素位置没有有效深度。
-
-可以在配置文件中切换深度对齐模式：
+后处理默认关闭。某个模型需要专用优化时，在配置中加上：
 
 ```yaml
-# configs/camera_detect.yaml
-orbbec_depth_align: sw  # sw 或 hw
+model: runs/xxx/weights/best.pt
+draw: full
+postprocess:
+  enabled: true
+  module: camera_runtime.postprocess_plugins.target_plate
+  function: process
+  params: {}
 ```
 
-窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图到 `data/reports/hole_detect_v1/camera_snapshots/`。脚本会在检测框中心画红点，并显示中心像素坐标，后续可用于机械臂对准流程接入。
+窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图。检测模型会绘制框和中心点；分割模型会按配置绘制 mask、框、标签和中心点。
