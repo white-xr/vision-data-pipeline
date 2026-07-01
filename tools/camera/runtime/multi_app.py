@@ -223,7 +223,15 @@ def close_pipeline(runtime: PipelineRuntime) -> None:
 
 
 def run_multi_camera(config: MultiRuntimeConfig) -> None:
-    runtimes = [open_pipeline_runtime(pipeline, config.project_root) for pipeline in config.pipelines]
+    runtimes: list[PipelineRuntime] = []
+    for pipeline in config.pipelines:
+        try:
+            runtimes.append(open_pipeline_runtime(pipeline, config.project_root))
+        except Exception as exc:
+            print(f"[ERROR] Pipeline {pipeline.name}: startup failed: {exc}")
+    if not runtimes:
+        raise SystemExit("[ERROR] No pipeline could be started.")
+
     print("[OK] Press q or Esc in any window to close that pipeline. Press s for snapshot, R to reset postprocess.")
     try:
         while any(runtime.active for runtime in runtimes):

@@ -15,9 +15,10 @@ def int_or_auto_value(value: Any) -> int | None:
 
 
 class OpenCvDisplay:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, width: int, height: int) -> None:
         self.title = title
         cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(self.title, int(width), int(height))
 
     def update(self, image: Any) -> str | None:
         cv2.imshow(self.title, image)
@@ -120,12 +121,12 @@ def create_display(display_config: dict[str, Any], inference_config: dict[str, A
     backend = str(display_config.get("backend", "auto"))
     window_width, window_height = resolve_window_size(display_config, frame_shape, inference_config)
     if backend == "opencv":
-        return OpenCvDisplay(title)
+        return OpenCvDisplay(title, window_width, window_height)
     if backend == "tkinter":
         return TkinterDisplay(title, window_width, window_height, bool(display_config.get("resize_to_window", True)))
 
     try:
-        return OpenCvDisplay(title)
+        return OpenCvDisplay(title, window_width, window_height)
     except cv2.error:
         print("[WARN] OpenCV window is unavailable, falling back to Tkinter display.")
         return TkinterDisplay(title, window_width, window_height, bool(display_config.get("resize_to_window", True)))

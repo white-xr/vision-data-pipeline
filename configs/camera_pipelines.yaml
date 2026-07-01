@@ -9,6 +9,8 @@ camera_aliases:            # 相机别名；业务 pipeline 里只引用别名�
     fps: 30.0
     orbbec:
       match_name: Gemini 335L
+      depth:
+        enabled: false
   orbbec_305:
     source: orbbec
     width: 960
@@ -16,6 +18,8 @@ camera_aliases:            # 相机别名；业务 pipeline 里只引用别名�
     fps: 30.0
     orbbec:
       match_name: Gemini 305
+      depth:
+        enabled: false
 
 common:                    # 所有 pipeline 的通用默认参数
   inference:
@@ -82,8 +86,8 @@ pipelines:
           message_frames: 45
           conf_threshold: 0.5
 
-  - name: reserved_305     # 305 相机：后续把模型路径改好并 enabled: true 即可
-    enabled: false
+  - name: reserved_305     # 305 相机：hole + triangle-metal 串行验证
+    enabled: true
     camera: orbbec_305
     display:
       window_title: 305 Reserved

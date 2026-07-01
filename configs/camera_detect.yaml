@@ -6,6 +6,9 @@ camera:                   # 相机配置；当前项目主要使用奥比中光 
   width: 960              # 请求彩色图宽度；实际值以相机支持的 profile 为准
   height: 600             # 请求彩色图高度；实际值以相机支持的 profile 为准
   fps: 30.0               # 请求帧率；实际帧率由相机、USB 带宽和推理速度共同决定
+  orbbec:                 # 奥比中光 SDK 参数；当前 anchor 对位不依赖深度
+    depth:                # 深度流配置
+      enabled: false      # 是否打开深度流；false=只跑 RGB，窗口和推理更轻
 
 model: data\models\Base_Cover.pt  # 模型权重路径；换模型主要改这一行
 task: auto                 # 模型任务类型；auto=自动判断，detect=检测，segment=分割
