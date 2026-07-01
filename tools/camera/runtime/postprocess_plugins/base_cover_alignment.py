@@ -162,6 +162,120 @@ def maybe_apply_depth_filter(mask: Any, depth_roi: Any, contour_params: dict[str
     return cv2.bitwise_and(mask, depth_mask)
 
 
+def expand_box(box_xyxy: list[float], image_shape: tuple[int, ...], margin_ratio: float) -> tuple[int, int, int, int] | None:
+    height, width = image_shape[:2]
+    x1, y1, x2, y2 = [float(value) for value in box_xyxy]
+    box_width = x2 - x1
+    box_height = y2 - y1
+    if box_width <= 2 or box_height <= 2:
+        return None
+    margin_x = box_width * max(0.0, float(margin_ratio))
+    margin_y = box_height * max(0.0, float(margin_ratio))
+    expanded = [x1 - margin_x, y1 - margin_y, x2 + margin_x, y2 + margin_y]
+    return clip_box(expanded, image_shape)
+
+
+def clean_depth_mask(mask: Any, depth_params: dict[str, Any]) -> Any:
+    morph_kernel = max(1, int(depth_params.get("morph_kernel", 7)))
+    if morph_kernel % 2 == 0:
+        morph_kernel += 1
+    if morph_kernel <= 1:
+        return mask
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel))
+    close_iterations = max(0, int(depth_params.get("close_iterations", 2)))
+    open_iterations = max(0, int(depth_params.get("open_iterations", 1)))
+    cleaned = mask
+    if close_iterations > 0:
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=close_iterations)
+    if open_iterations > 0:
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=open_iterations)
+    return cleaned
+
+
+def depth_foreground_mask(depth_roi: Any, params: dict[str, Any]) -> Any | None:
+    if depth_roi is None:
+        return None
+
+    import numpy as np
+
+    depth_params = dict(params.get("depth_segmentation", {}) or {})
+    values = np.asarray(depth_roi, dtype="float32")
+    min_depth = float(depth_params.get("min_depth_mm", params.get("depth_min_mm", 1.0)))
+    max_depth = float(depth_params.get("max_depth_mm", params.get("depth_max_mm", 10000.0)))
+    valid_mask = np.isfinite(values) & (values >= min_depth) & (values <= max_depth)
+    valid_values = values[valid_mask]
+    min_valid_pixels = int(depth_params.get("min_valid_pixels", 50))
+    if valid_values.size < min_valid_pixels:
+        return None
+
+    near_percentile = float(depth_params.get("near_percentile", 35.0))
+    near_percentile = max(1.0, min(99.0, near_percentile))
+    front_depth = float(np.percentile(valid_values, near_percentile))
+    lower_tolerance = float(depth_params.get("lower_tolerance_mm", 30.0))
+    upper_tolerance = float(depth_params.get("depth_tolerance_mm", 120.0))
+    mask = (
+        valid_mask
+        & (values >= front_depth - lower_tolerance)
+        & (values <= front_depth + upper_tolerance)
+    ).astype("uint8") * 255
+    if cv2.countNonZero(mask) == 0:
+        return None
+    return clean_depth_mask(mask, depth_params)
+
+
+def find_depth_contour(
+    depth_image: Any,
+    box_xyxy: list[float],
+    image_shape: tuple[int, ...],
+    params: dict[str, Any],
+) -> tuple[Any | None, list[dict[str, Any]]]:
+    if depth_image is None:
+        return None, []
+
+    import numpy as np
+
+    depth_params = dict(params.get("depth_segmentation", {}) or {})
+    clipped = expand_box(box_xyxy, image_shape, float(depth_params.get("margin_ratio", 0.06)))
+    if clipped is None:
+        return None, []
+    x1, y1, x2, y2 = clipped
+    depth_roi = depth_image[y1:y2, x1:x2]
+    if depth_roi.size == 0:
+        return None, []
+
+    mask = depth_foreground_mask(depth_roi, params)
+    if mask is None:
+        return None, []
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_area_ratio = float(depth_params.get("min_area_ratio", params.get("contour", {}).get("min_area_ratio", 0.03)))
+    min_area = max(8.0, (x2 - x1) * (y2 - y1) * min_area_ratio)
+    best_contour = None
+    best_area = 0.0
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area < min_area or area <= best_area:
+            continue
+        best_contour = contour
+        best_area = area
+
+    if best_contour is None:
+        return None, []
+
+    offset = np.array([[[x1, y1]]], dtype=best_contour.dtype)
+    global_contour = best_contour + offset
+    overlays = []
+    if bool(depth_params.get("draw_contour", True)):
+        overlays.append(
+            {
+                "type": "contour",
+                "points": global_contour.reshape((-1, 2)).astype(int).tolist(),
+                "color": [255, 255, 0],
+                "thickness": 2,
+            }
+        )
+    return global_contour, overlays
+
 def find_main_contour(
     frame: Any,
     depth_image: Any,
@@ -216,24 +330,30 @@ def find_main_contour(
     return global_contour, overlays
 
 
-def minrect_from_contour(contour: Any, contour_params: dict[str, Any]) -> tuple[tuple[float, float] | None, list[dict[str, Any]]]:
+def minrect_data(contour: Any) -> tuple[Any | None, Any | None]:
     if contour is None or len(contour) < 3:
-        return None, []
+        return None, None
     rect = cv2.minAreaRect(contour)
-    (center_x, center_y), (width, height), _ = rect
+    (_, _), (width, height), _ = rect
     if width <= 0 or height <= 0:
+        return None, None
+    return rect, cv2.boxPoints(rect)
+
+
+def minrect_from_contour(contour: Any, contour_params: dict[str, Any]) -> tuple[tuple[float, float] | None, list[dict[str, Any]]]:
+    rect, box = minrect_data(contour)
+    if rect is None or box is None:
         return None, []
+    (center_x, center_y), (_, _), _ = rect
     if not bool(contour_params.get("draw_minrect", True)):
         return (float(center_x), float(center_y)), []
-    box = cv2.boxPoints(rect)
     overlay = {
         "type": "minrect",
         "points": box.astype(int).tolist(),
-        "color": [255, 0, 255],
+        "color": contour_params.get("minrect_color", [255, 0, 255]),
         "thickness": 2,
     }
     return (float(center_x), float(center_y)), [overlay]
-
 
 def contour_centroid(contour: Any) -> tuple[float, float] | None:
     if contour is None:
@@ -244,7 +364,7 @@ def contour_centroid(contour: Any) -> tuple[float, float] | None:
     return float(moments["m10"] / moments["m00"]), float(moments["m01"] / moments["m00"])
 
 
-def anchor_center(detection: dict[str, Any], params: dict[str, Any]) -> tuple[float, float] | None:
+def anchor_ratios(detection: dict[str, Any], params: dict[str, Any], default_center: bool = False) -> tuple[float, float] | None:
     anchors = params.get("anchors", {}) or {}
     class_name = norm_name(detection.get("class_name"))
     anchor = None
@@ -253,15 +373,67 @@ def anchor_center(detection: dict[str, Any], params: dict[str, Any]) -> tuple[fl
             anchor = value
             break
     if not isinstance(anchor, dict):
+        return (0.5, 0.5) if default_center else None
+    return float(anchor.get("rx", 0.5)), float(anchor.get("ry", 0.5))
+
+
+def anchor_center(detection: dict[str, Any], params: dict[str, Any]) -> tuple[float, float] | None:
+    ratios = anchor_ratios(detection, params)
+    if ratios is None:
         return None
     box_xyxy = detection.get("box_xyxy")
     if not box_xyxy:
         return None
     x1, y1, x2, y2 = [float(value) for value in box_xyxy]
-    rx = float(anchor.get("rx", 0.5))
-    ry = float(anchor.get("ry", 0.5))
+    rx, ry = ratios
     return x1 + rx * (x2 - x1), y1 + ry * (y2 - y1)
 
+
+def order_rect_points(points: Any) -> Any:
+    import numpy as np
+
+    pts = np.asarray(points, dtype="float32")
+    ordered = np.zeros((4, 2), dtype="float32")
+    sums = pts.sum(axis=1)
+    diffs = np.diff(pts, axis=1).reshape(-1)
+    ordered[0] = pts[int(np.argmin(sums))]
+    ordered[2] = pts[int(np.argmax(sums))]
+    ordered[1] = pts[int(np.argmin(diffs))]
+    ordered[3] = pts[int(np.argmax(diffs))]
+    return ordered
+
+
+def rotated_anchor_point(rect_points: Any, rx: float, ry: float) -> tuple[float, float]:
+    ordered = order_rect_points(rect_points)
+    top_left, top_right, _, bottom_left = ordered
+    point = top_left + float(rx) * (top_right - top_left) + float(ry) * (bottom_left - top_left)
+    return float(point[0]), float(point[1])
+
+
+def rotated_anchor_from_contour(
+    detection: dict[str, Any],
+    contour: Any,
+    params: dict[str, Any],
+    draw_params: dict[str, Any],
+) -> tuple[tuple[float, float] | None, list[dict[str, Any]]]:
+    rect, box = minrect_data(contour)
+    if rect is None or box is None:
+        return None, []
+    ratios = anchor_ratios(detection, params, default_center=True)
+    if ratios is None:
+        return None, []
+    rx, ry = ratios
+    overlays = []
+    if bool(draw_params.get("draw_minrect", True)):
+        overlays.append(
+            {
+                "type": "minrect",
+                "points": box.astype(int).tolist(),
+                "color": draw_params.get("minrect_color", [255, 0, 255]),
+                "thickness": 2,
+            }
+        )
+    return rotated_anchor_point(box, rx, ry), overlays
 
 def center_mode_for_detection(detection: dict[str, Any], params: dict[str, Any]) -> str:
     class_name = norm_name(detection.get("class_name"))
@@ -301,6 +473,56 @@ def compute_postprocessed_center(
         center_x, center_y = box_center(box_xyxy)
         update_center(detection, center_x, center_y, "box_fallback", depth_image, params)
         return "box_fallback", []
+
+    if mode in {"depth_rotated_anchor", "depth_anchor", "rotated_depth_anchor"}:
+        contour, overlays = find_depth_contour(depth_image, box_xyxy, frame.shape, params)
+        if contour is not None:
+            center, rect_overlays = rotated_anchor_from_contour(
+                detection,
+                contour,
+                params,
+                dict(params.get("depth_segmentation", {}) or {}),
+            )
+            overlays.extend(rect_overlays)
+            if center is not None:
+                update_center(detection, center[0], center[1], "depth_rotated_anchor", depth_image, params)
+                return "depth_rotated_anchor", overlays
+        warn_once(
+            f"depth:{norm_name(detection.get('class_name'))}",
+            f"Depth segmentation failed for {detection.get('class_name')}; falling back to anchor center.",
+        )
+        center = anchor_center(detection, params)
+        if center is not None:
+            update_center(detection, center[0], center[1], "anchor_fallback", depth_image, params)
+            return "anchor_fallback", overlays
+        center_x, center_y = box_center(box_xyxy)
+        update_center(detection, center_x, center_y, "box_fallback", depth_image, params)
+        return "box_fallback", overlays
+
+    if mode in {"rotated_anchor", "contour_rotated_anchor", "rgb_rotated_anchor"}:
+        contour, overlays = find_main_contour(frame, depth_image, box_xyxy, params)
+        if contour is not None:
+            center, rect_overlays = rotated_anchor_from_contour(
+                detection,
+                contour,
+                params,
+                dict(params.get("contour", {}) or {}),
+            )
+            overlays.extend(rect_overlays)
+            if center is not None:
+                update_center(detection, center[0], center[1], "rotated_anchor", depth_image, params)
+                return "rotated_anchor", overlays
+        warn_once(
+            f"rotated_anchor:{norm_name(detection.get('class_name'))}",
+            f"Rotated anchor contour failed for {detection.get('class_name')}; falling back to anchor center.",
+        )
+        center = anchor_center(detection, params)
+        if center is not None:
+            update_center(detection, center[0], center[1], "anchor_fallback", depth_image, params)
+            return "anchor_fallback", overlays
+        center_x, center_y = box_center(box_xyxy)
+        update_center(detection, center_x, center_y, "box_fallback", depth_image, params)
+        return "box_fallback", overlays
 
     if mode in {"contour", "minrect"}:
         contour, overlays = find_main_contour(frame, depth_image, box_xyxy, params)

@@ -19,9 +19,9 @@ half: true                 # 是否使用半精度推理；CUDA 建议 true，CP
 max_det: 3                 # 每帧最多保留目标数量；目标多时调大
 
 draw: detect               # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
-draw_centers: true         # 是否绘制红色中心点；true=显示，false=隐藏
+draw_centers: false        # 是否绘制通用红色中心点；false=只看后处理 Base/Cover 对位点
 draw_center_labels: false  # 是否显示中心点坐标和深度文字；false=只画点，避免遮挡工件
-center_mode: anchor        # 中心点算法；检测模型建议 anchor，box=框中心，contour/minrect=图像轮廓中心
+center_mode: depth_rotated_anchor  # 中心点算法；用深度分割+旋转矩形+anchor，失败自动回退 anchor
 center_depth_window: 15    # 中心点深度取样窗口；15=取中心周围 15x15 区域的有效深度中位数
 
 postprocess:               # 后处理配置；业务逻辑放在插件里，不污染通用检测脚本
@@ -31,6 +31,17 @@ postprocess:               # 后处理配置；业务逻辑放在插件里，不
   params:                  # 插件参数
     base_class: Base       # 底座类别名；当前 Base_Cover.pt 模型类别为 Base/Cover
     cover_class: Cover     # 盖板类别名；大小写不敏感
+    depth_segmentation:    # 深度分割参数；优先用深度把工件从桌面背景中分出来
+      margin_ratio: 0.06   # ROI 外扩比例；避免 YOLO 框贴边切掉真实轮廓
+      near_percentile: 35  # 取 ROI 内较近深度的百分位；工件通常比桌面更靠近相机
+      depth_tolerance_mm: 120  # 向远处保留的深度范围；太小会断边，太大会吃进桌面
+      lower_tolerance_mm: 30   # 向近处允许的深度范围；过滤异常近点
+      min_area_ratio: 0.03 # 深度前景最小面积比例；低于 bbox 面积 3% 视为失败
+      morph_kernel: 7      # 深度 mask 形态学核大小；用于补洞和去小噪声
+      close_iterations: 2  # 闭运算次数；连接断开的深度区域
+      open_iterations: 1   # 开运算次数；去掉小碎片
+      draw_contour: true   # 是否绘制深度分割得到的轮廓
+      draw_minrect: true   # 是否绘制深度轮廓的旋转矩形
     contour:               # ROI 轮廓提取参数；用于 contour/minrect 中心模式
       min_area_ratio: 0.03 # 主轮廓最小面积比例；低于 bbox 面积 3% 的轮廓视为噪声
       blur_kernel: 5       # 高斯滤波核大小；必须为奇数，越大越平滑
