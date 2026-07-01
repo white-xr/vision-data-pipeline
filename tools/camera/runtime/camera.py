@@ -87,7 +87,7 @@ class OpenCvCapture:
             self.capture.release()
             raise SystemExit(
                 f"[ERROR] Camera opened but no frame was received: {source}, backend={backend_name(self.api)}.\n"
-                "[HINT] Try another index: python tools/camera_detect.py --list-cameras"
+                "[HINT] Try another index: python tools/camera/camera_detect.py --list-cameras"
             )
 
     def apply_controls(self, controls: dict[str, Any]) -> None:

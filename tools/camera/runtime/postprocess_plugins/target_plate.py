@@ -4,7 +4,7 @@ from typing import Any
 
 import cv2
 
-from camera_runtime.geometry import binary_mask_center, clean_binary_mask, lookup_depth_mm, mean_depth_for_mask
+from runtime.geometry import binary_mask_center, clean_binary_mask, lookup_depth_mm, mean_depth_for_mask
 
 
 def _depth_text(value: float | None) -> str:

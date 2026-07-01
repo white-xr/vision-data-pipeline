@@ -1,7 +1,7 @@
 """Split annotated YOLO Detect data into train/val directories.
 
 Example:
-    python tools/split_yolo_dataset.py \
+    python tools/dataset/split_yolo_dataset.py \
         --src-dir data/annotation/hole_detect_v1 \
         --out-dir data/datasets/hole_detect_v1 \
         --train-ratio 0.8 \

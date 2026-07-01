@@ -1,4 +1,4 @@
-# 通用相机实时识别配置；运行命令：python tools/camera_detect.py
+# 通用相机实时识别配置；运行命令：python tools/camera/camera_detect.py
 # 换模型时通常只改 model、task、classes、imgsz、conf、draw、draw_centers。
 
 camera:                   # 相机配置；当前项目主要使用奥比中光 335L/305

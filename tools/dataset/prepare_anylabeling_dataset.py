@@ -1,7 +1,7 @@
 """Copy raw images into an AnyLabeling annotation workspace.
 
 Example:
-    python tools/prepare_anylabeling_dataset.py \
+    python tools/dataset/prepare_anylabeling_dataset.py \
         --raw-dir data/raw \
         --out-dir data/annotation/hole_detect_v1
 """
@@ -121,4 +121,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

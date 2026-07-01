@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "camera_detect.yaml"
 
 
@@ -81,7 +81,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "output": {
         "save_video": None,
-        "snapshot_dir": "data/reports/camera_runtime/camera_snapshots",
+        "snapshot_dir": "data/reports/camera/camera_snapshots",
     },
     "debug": {
         "preview_only": False,

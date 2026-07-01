@@ -1,15 +1,15 @@
 """Start the generic camera inference runtime.
 
 Examples:
-    python tools/camera_detect.py
-    python tools/camera_detect.py --dry-run
+    python tools/camera/camera_detect.py
+    python tools/camera/camera_detect.py --dry-run
 """
 
 from __future__ import annotations
 
 import sys
 
-from camera_runtime.app import main
+from runtime.app import main
 
 
 if __name__ == "__main__":

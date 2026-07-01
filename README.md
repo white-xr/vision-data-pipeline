@@ -28,6 +28,14 @@ conda activate vision-data
 
 运行工具前请先激活环境。更多环境创建、更新和验证命令见 [docs/environment_setup.md](docs/environment_setup.md)。
 
+## 工具目录
+
+```text
+tools/
+├── dataset/  # 数据浏览、筛选导出、标注准备、数据集划分和格式转换
+└── camera/   # 实时相机识别、YOLO 推理、显示和后处理
+```
+
 ## 数据目录
 
 ```text
@@ -48,13 +56,13 @@ FiftyOne 用于快速浏览 `data/raw/` 下的原始图片，并通过人工打 
 启动浏览：
 
 ```bash
-python tools/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1
+python tools/dataset/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1
 ```
 
 如果同名 FiftyOne dataset 已存在，脚本默认会加载已有 dataset，避免误删人工筛选结果。确认要重建时再使用：
 
 ```bash
-python tools/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1 --overwrite
+python tools/dataset/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1 --overwrite
 ```
 
 在 FiftyOne App 中给图片打样本 tag：
@@ -68,7 +76,7 @@ bad
 导出准备标注的图片：
 
 ```bash
-python tools/export_annotation_candidates.py \
+python tools/dataset/export_annotation_candidates.py \
   --dataset-name hole_review_v1 \
   --out-dir data/annotation/hole_detect_v1 \
   --include-tags to_annotate hard
@@ -94,7 +102,7 @@ base_edge_hole
 从 `data/raw/` 准备 AnyLabeling 标注目录：
 
 ```bash
-python tools/prepare_anylabeling_dataset.py --raw-dir data/raw --out-dir data/annotation/hole_detect_v1
+python tools/dataset/prepare_anylabeling_dataset.py --raw-dir data/raw --out-dir data/annotation/hole_detect_v1
 ```
 
 该命令只复制原图，不会删除、移动、重命名 `data/raw/` 中的原始图片。复制后的图片会带上 batch 名，例如：
@@ -136,7 +144,7 @@ python -m anylabeling.app
 从已标注目录生成 YOLO Detect 训练集和验证集：
 
 ```bash
-python tools/split_yolo_dataset.py \
+python tools/dataset/split_yolo_dataset.py \
   --src-dir data/annotation/hole_detect_v1 \
   --out-dir data/datasets/hole_detect_v1 \
   --train-ratio 0.8 \
@@ -195,7 +203,7 @@ AnyLabeling 标注边缘安装孔
 
 ## 相机实时识别
 
-通用实时识别入口是 `tools/camera_detect.py`，可接入奥比中光 RGB-D 相机、普通 USB 相机或 RTSP/HTTP 视频流，并自动兼容 YOLO 检测模型和分割模型。
+通用实时识别入口是 `tools/camera/camera_detect.py`，可接入奥比中光 RGB-D 相机、普通 USB 相机或 RTSP/HTTP 视频流，并自动兼容 YOLO 检测模型和分割模型。
 
 默认配置文件是：
 
@@ -206,25 +214,25 @@ configs/camera_detect.yaml
 启动实时识别：
 
 ```bash
-python tools/camera_detect.py
+python tools/camera/camera_detect.py
 ```
 
 运行前检查配置、模型路径和后处理插件：
 
 ```bash
-python tools/camera_detect.py --dry-run
+python tools/camera/camera_detect.py --dry-run
 ```
 
 只预览相机、不加载模型：
 
 ```bash
-python tools/camera_detect.py --preview-only
+python tools/camera/camera_detect.py --preview-only
 ```
 
 扫描相机：
 
 ```bash
-python tools/camera_detect.py --list-cameras
+python tools/camera/camera_detect.py --list-cameras
 ```
 
 `configs/camera_detect.yaml` 是当前要运行的模型配置。日常换模型通常只改 `model`、`task`、`imgsz`、`conf`、`draw` 和可选 `classes/postprocess`，不需要改 Python 代码。
@@ -242,7 +250,7 @@ model: runs/xxx/weights/best.pt
 draw: full
 postprocess:
   enabled: true
-  module: camera_runtime.postprocess_plugins.target_plate
+  module: runtime.postprocess_plugins.target_plate
   function: process
   params: {}
 ```

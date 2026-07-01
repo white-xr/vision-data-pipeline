@@ -1,7 +1,7 @@
 """Convert COCO polygon segmentation annotations to YOLO Segment format.
 
 Example:
-    python tools/convert_coco_to_yolo_segment.py \
+    python tools/dataset/convert_coco_to_yolo_segment.py \
         --coco-json data/datasets/triangle-metal_detect_v1/annotations.json \
         --images-dir data/datasets/triangle-metal_detect_v1 \
         --out-dir data/datasets/triangle-metal_seg_v1

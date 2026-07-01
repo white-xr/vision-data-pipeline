@@ -1,7 +1,7 @@
 """Export manually selected FiftyOne samples for annotation.
 
 Example:
-    python tools/export_annotation_candidates.py \
+    python tools/dataset/export_annotation_candidates.py \
         --dataset-name hole_review_v1 \
         --out-dir data/annotation/hole_detect_v1 \
         --include-tags to_annotate hard
@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-name",
         required=True,
-        help="FiftyOne dataset name created by tools/view_with_fiftyone.py.",
+        help="FiftyOne dataset name created by tools/dataset/view_with_fiftyone.py.",
     )
     parser.add_argument(
         "--out-dir",

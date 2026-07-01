@@ -1,7 +1,7 @@
 """Load raw images into FiftyOne for manual review.
 
 Example:
-    python tools/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1
+    python tools/dataset/view_with_fiftyone.py --raw-dir data/raw --dataset-name hole_review_v1
 """
 
 from __future__ import annotations
@@ -110,4 +110,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
