@@ -203,22 +203,28 @@ def find_main_contour(
 
     offset = np.array([[[x1, y1]]], dtype=best_contour.dtype)
     global_contour = best_contour + offset
-    overlay = {
-        "type": "contour",
-        "points": global_contour.reshape((-1, 2)).astype(int).tolist(),
-        "color": [0, 255, 255],
-        "thickness": 2,
-    }
-    return global_contour, [overlay]
+    overlays = []
+    if bool(contour_params.get("draw_contour", True)):
+        overlays.append(
+            {
+                "type": "contour",
+                "points": global_contour.reshape((-1, 2)).astype(int).tolist(),
+                "color": [0, 255, 255],
+                "thickness": 2,
+            }
+        )
+    return global_contour, overlays
 
 
-def minrect_from_contour(contour: Any) -> tuple[tuple[float, float] | None, list[dict[str, Any]]]:
+def minrect_from_contour(contour: Any, contour_params: dict[str, Any]) -> tuple[tuple[float, float] | None, list[dict[str, Any]]]:
     if contour is None or len(contour) < 3:
         return None, []
     rect = cv2.minAreaRect(contour)
     (center_x, center_y), (width, height), _ = rect
     if width <= 0 or height <= 0:
         return None, []
+    if not bool(contour_params.get("draw_minrect", True)):
+        return (float(center_x), float(center_y)), []
     box = cv2.boxPoints(rect)
     overlay = {
         "type": "minrect",
@@ -257,13 +263,23 @@ def anchor_center(detection: dict[str, Any], params: dict[str, Any]) -> tuple[fl
     return x1 + rx * (x2 - x1), y1 + ry * (y2 - y1)
 
 
+def center_mode_for_detection(detection: dict[str, Any], params: dict[str, Any]) -> str:
+    class_name = norm_name(detection.get("class_name"))
+    center_modes = params.get("center_modes", params.get("class_center_modes", {})) or {}
+    if isinstance(center_modes, dict):
+        for key, value in center_modes.items():
+            if norm_name(key) == class_name:
+                return str(value).strip().lower()
+    return str(params.get("center_mode", "box")).strip().lower()
+
+
 def compute_postprocessed_center(
     detection: dict[str, Any],
     frame: Any,
     depth_image: Any,
     params: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
-    mode = str(params.get("center_mode", "box")).strip().lower()
+    mode = center_mode_for_detection(detection, params)
     box_xyxy = detection.get("box_xyxy")
     if not box_xyxy:
         return "missing_box", []
@@ -303,7 +319,7 @@ def compute_postprocessed_center(
                 update_center(detection, center[0], center[1], "contour", depth_image, params)
                 return "contour", overlays
 
-        rect_center, rect_overlays = minrect_from_contour(contour)
+        rect_center, rect_overlays = minrect_from_contour(contour, dict(params.get("contour", {}) or {}))
         overlays.extend(rect_overlays)
         if rect_center is not None:
             source = "minrect" if mode == "minrect" else "minrect_fallback"
@@ -434,7 +450,8 @@ def process(detections: list[dict[str, Any]], frame: Any, depth_image: Any, para
     detected_base_center = center_dict(base_detection)
     cover_center = center_dict(cover_detection)
     locked_base_center = _STATE.locked_base_center
-    add_point_overlay(overlays, detected_base_center, "Base detected", [0, 255, 255])
+    if locked_base_center is None:
+        add_point_overlay(overlays, detected_base_center, "Base detected", [0, 255, 255])
     add_point_overlay(overlays, locked_base_center, "Base LOCKED", [0, 255, 0])
     add_point_overlay(overlays, cover_center, "Cover", [0, 0, 255])
 

@@ -19,8 +19,9 @@ half: true                 # 是否使用半精度推理；CUDA 建议 true，CP
 max_det: 3                 # 每帧最多保留目标数量；目标多时调大
 
 draw: detect               # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
-draw_centers: true         # 是否绘制红色中心点和坐标；true=显示，false=隐藏
-center_mode: minrect       # 中心点算法；box=框中心，contour=轮廓质心，minrect=旋转矩形中心，anchor=类别锚点
+draw_centers: true         # 是否绘制红色中心点；true=显示，false=隐藏
+draw_center_labels: false  # 是否显示中心点坐标和深度文字；false=只画点，避免遮挡工件
+center_mode: anchor        # 中心点算法；检测模型建议 anchor，box=框中心，contour/minrect=图像轮廓中心
 center_depth_window: 15    # 中心点深度取样窗口；15=取中心周围 15x15 区域的有效深度中位数
 
 postprocess:               # 后处理配置；业务逻辑放在插件里，不污染通用检测脚本
