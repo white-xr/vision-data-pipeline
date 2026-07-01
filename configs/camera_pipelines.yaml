@@ -87,9 +87,14 @@ pipelines:
     camera: orbbec_305
     display:
       window_title: 305 Reserved
-    models:
-      - name: replace_me
-        path: data/models/replace_me.pt
+    models:                 # 多个模型按从上到下的顺序串行运行
+      - name: hole
+        path: data/models/hole.pt
+        task: auto
+        conf: 0.5
+        imgsz: 640
+      - name: triangle_metal
+        path: data/models/triangle-metal.pt
         task: auto
         conf: 0.5
         imgsz: 640
