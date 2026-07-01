@@ -26,6 +26,8 @@ class OpenCvDisplay:
             return "quit"
         if key == ord("s"):
             return "snapshot"
+        if key in (ord("r"), ord("R")):
+            return "reset"
         return None
 
     def close(self) -> None:
@@ -65,6 +67,8 @@ class TkinterDisplay:
             self.pending_action = "quit"
         elif key == "s":
             self.pending_action = "snapshot"
+        elif key == "r":
+            self.pending_action = "reset"
 
     def update(self, image: Any) -> str | None:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

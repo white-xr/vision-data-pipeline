@@ -243,16 +243,18 @@ python tools/camera/camera_detect.py --list-cameras
 python -m pip install --no-deps pyorbbecsdk2
 ```
 
-后处理默认关闭。某个模型需要专用优化时，在配置中加上：
+后处理通过插件接入，业务逻辑不写进通用检测脚本。当前 Base/Cover 检测配置启用了 `runtime.postprocess_plugins.base_cover_alignment`，用于在 bbox 内提取轮廓中心、锁定 Base 中心，并实时显示 Cover 相对 Base 的 `dx/dy`。如果某个模型不需要后处理，把 `postprocess.enabled` 改为 `false` 即可。
+
+插件配置示例：
 
 ```yaml
 model: runs/xxx/weights/best.pt
-draw: full
+draw: detect
 postprocess:
   enabled: true
-  module: runtime.postprocess_plugins.target_plate
+  module: runtime.postprocess_plugins.base_cover_alignment
   function: process
   params: {}
 ```
 
-窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图。检测模型会绘制框和中心点；分割模型会按配置绘制 mask、框、标签和中心点。
+窗口模式下按 `q` 或 `Esc` 退出，按 `s` 保存当前识别截图，按 `R` 重置后处理锁定状态。检测模型会绘制框和中心点；分割模型会按配置绘制 mask、框、标签和中心点。

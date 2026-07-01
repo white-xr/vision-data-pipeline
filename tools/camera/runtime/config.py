@@ -216,6 +216,15 @@ def normalize_profile_block(block: dict[str, Any]) -> dict[str, Any]:
         ):
             move_key(normalized, key, visualize, key)
 
+    postprocess = normalized.setdefault("postprocess", {})
+    if isinstance(postprocess, dict):
+        params = postprocess.setdefault("params", {})
+        if isinstance(params, dict):
+            if "center_mode" in visualize:
+                params.setdefault("center_mode", visualize["center_mode"])
+            for key in ("center_depth_window", "contour", "anchors", "base_lock", "base_class", "cover_class"):
+                move_key(normalized, key, params, key)
+
     return normalized
 
 

@@ -92,6 +92,77 @@ def draw_detections(image: Any, detections: list[dict[str, Any]], visualize_conf
     return annotated
 
 
+def color_tuple(value: Any, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
+    if value is None:
+        return fallback
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        return int(value[0]), int(value[1]), int(value[2])
+    return fallback
+
+
+def draw_overlays(image: Any, overlays: list[dict[str, Any]]) -> None:
+    for overlay in overlays:
+        kind = overlay.get("type")
+        color = color_tuple(overlay.get("color"), (0, 255, 255))
+        thickness = int(overlay.get("thickness", 2))
+
+        if kind in {"contour", "polygon", "minrect"}:
+            import numpy as np
+
+            points = overlay.get("points")
+            if not points:
+                continue
+            pts = np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(image, [pts], isClosed=True, color=color, thickness=thickness, lineType=cv2.LINE_AA)
+        elif kind == "point":
+            x = overlay.get("x")
+            y = overlay.get("y")
+            if x is None or y is None:
+                continue
+            radius = int(overlay.get("radius", 5))
+            cv2.circle(image, (int(round(x)), int(round(y))), radius, color, -1)
+            label = overlay.get("label")
+            if label:
+                cv2.putText(
+                    image,
+                    str(label),
+                    (int(round(x)) + 8, int(round(y)) - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    color,
+                    2,
+                    cv2.LINE_AA,
+                )
+        elif kind == "line":
+            start = overlay.get("start")
+            end = overlay.get("end")
+            if not start or not end:
+                continue
+            cv2.line(
+                image,
+                (int(round(start[0])), int(round(start[1]))),
+                (int(round(end[0])), int(round(end[1]))),
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+        elif kind == "text":
+            text = overlay.get("text")
+            at = overlay.get("at", [12, 32])
+            if not text:
+                continue
+            cv2.putText(
+                image,
+                str(text),
+                (int(round(at[0])), int(round(at[1]))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                float(overlay.get("scale", 0.65)),
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+
+
 def draw_status_lines(image: Any, lines: list[str]) -> None:
     for index, line in enumerate(lines):
         y = 32 + index * 28

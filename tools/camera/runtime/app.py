@@ -13,7 +13,7 @@ from .display import create_display
 from .geometry import prepare_depth_for_lookup
 from .inference import YoloRunner, detections_from_result
 from .postprocess import load_post_processor
-from .visualize import draw_detections, draw_status_lines
+from .visualize import draw_detections, draw_overlays, draw_status_lines
 
 
 def create_writer(path: Path, fps: float, frame_size: tuple[int, int]) -> cv2.VideoWriter:
@@ -131,6 +131,7 @@ def run_camera(config: RuntimeConfig) -> None:
                 warned_depth_unaligned = True
 
             plugin_status: list[str] = []
+            overlays: list[dict[str, Any]] = []
             if preview_only:
                 detections = []
                 annotated = frame.copy()
@@ -148,7 +149,9 @@ def run_camera(config: RuntimeConfig) -> None:
                 processed = post_processor.process(last_detections, frame, depth_for_lookup)
                 detections = processed["detections"]
                 plugin_status = processed["status_lines"]
+                overlays = processed.get("overlays", [])
                 annotated = draw_detections(frame, detections, config.visualize)
+                draw_overlays(annotated, overlays)
 
             elapsed = max(time.time() - started_at, 1e-6)
             status_lines = [f"FPS: {frame_id / elapsed:.1f}"]
@@ -157,7 +160,7 @@ def run_camera(config: RuntimeConfig) -> None:
             else:
                 status_lines.append(f"Detections: {len(detections)}")
             status_lines.extend(plugin_status)
-            draw_status_lines(annotated, status_lines[:5])
+            draw_status_lines(annotated, status_lines[:7])
 
             if config.debug.get("print_frame_stats", False):
                 print(f"[FRAME {frame_id}] {frame_stats_text(frame)}")
@@ -182,6 +185,9 @@ def run_camera(config: RuntimeConfig) -> None:
                 if action == "snapshot" and snapshot_dir is not None:
                     path = save_snapshot(snapshot_dir, annotated)
                     print(f"[OK] Snapshot saved: {path}")
+                if action == "reset":
+                    post_processor.handle_action("reset")
+                    print("[OK] Reset requested.")
     finally:
         capture.release()
         if writer is not None:

@@ -18,9 +18,31 @@ device: "0"                # 推理设备；"0"=第一张 CUDA GPU，"cpu"=CPU
 half: true                 # 是否使用半精度推理；CUDA 建议 true，CPU 会自动忽略
 max_det: 3                 # 每帧最多保留目标数量；目标多时调大
 
-draw: segment              # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
+draw: detect               # 可视化模式；segment=只看分割，detect=框+标签+中心点，full=全部显示
 draw_centers: true         # 是否绘制红色中心点和坐标；true=显示，false=隐藏
-center_mode: centroid      # 中心点算法；centroid=mask质心，bottom=mask底部中心，box=检测框中心
+center_mode: minrect       # 中心点算法；box=框中心，contour=轮廓质心，minrect=旋转矩形中心，anchor=类别锚点
+center_depth_window: 15    # 中心点深度取样窗口；15=取中心周围 15x15 区域的有效深度中位数
+
+postprocess:               # 后处理配置；业务逻辑放在插件里，不污染通用检测脚本
+  enabled: true            # 是否启用后处理插件；true=启用 Base/Cover 中心优化和 base 锁定
+  module: runtime.postprocess_plugins.base_cover_alignment  # 插件模块路径
+  function: process        # 插件入口函数；默认 process
+  params:                  # 插件参数
+    base_class: Base       # 底座类别名；当前 Base_Cover.pt 模型类别为 Base/Cover
+    cover_class: Cover     # 盖板类别名；大小写不敏感
+    contour:               # ROI 轮廓提取参数；用于 contour/minrect 中心模式
+      min_area_ratio: 0.03 # 主轮廓最小面积比例；低于 bbox 面积 3% 的轮廓视为噪声
+      blur_kernel: 5       # 高斯滤波核大小；必须为奇数，越大越平滑
+      morph_kernel: 5      # 形态学开闭运算核大小；用于去噪和补边
+      use_canny: true      # 是否优先使用 Canny 边缘；失败时仍会尝试阈值分割
+    anchors:               # anchor 模式类别锚点；rx/ry 是 bbox 内相对位置
+      Cover: {rx: 0.56, ry: 0.48}  # Cover 固定相对中心点
+      Base: {rx: 0.50, ry: 0.53}   # Base 固定相对中心点
+    base_lock:             # Base 锁定机制；Base 稳定后不再因遮挡更新
+      stable_frames: 5     # 连续稳定帧数；达到后锁定 Base 中心
+      stable_threshold_px: 5  # 稳定阈值；中心点波动小于该像素距离才计为稳定
+      conf_threshold: 0.5  # Base 锁定所需最低置信度
+      enable_manual_reset: true  # 是否允许按 R 手动重置锁定状态
 
 display:                   # 显示窗口配置
   backend: tkinter         # 显示后端；tkinter 兼容性好，opencv 依赖 GUI 版 OpenCV
