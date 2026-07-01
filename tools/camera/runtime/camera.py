@@ -232,12 +232,35 @@ class OrbbecColorCapture:
         self.ob_format = OBFormat
         self.context = None
         serial = orbbec_config.get("serial")
-        if serial:
+        match_name = orbbec_config.get("match_name")
+        if serial or match_name:
             self.context = Context()
             devices = self.context.query_devices()
             if devices.get_count() == 0:
                 raise SystemExit("[ERROR] No Orbbec devices were found.")
-            device = devices.get_device_by_serial_number(str(serial))
+            if serial:
+                device = devices.get_device_by_serial_number(str(serial))
+            else:
+                match_text = str(match_name).strip().lower()
+                matched_indexes = [
+                    index
+                    for index in range(devices.get_count())
+                    if match_text in str(devices.get_device_name_by_index(index)).lower()
+                ]
+                if not matched_indexes:
+                    available = ", ".join(
+                        f"{devices.get_device_name_by_index(index)}({devices.get_device_serial_number_by_index(index)})"
+                        for index in range(devices.get_count())
+                    )
+                    raise SystemExit(
+                        f"[ERROR] No Orbbec device matched name {match_name!r}. Available: {available}"
+                    )
+                if len(matched_indexes) > 1:
+                    print(
+                        f"[WARN] Multiple Orbbec devices matched {match_name!r}; "
+                        f"using index {matched_indexes[0]}."
+                    )
+                device = devices.get_device_by_index(matched_indexes[0])
             self.pipeline = Pipeline(device)
         else:
             self.pipeline = Pipeline()

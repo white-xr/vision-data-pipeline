@@ -1,0 +1,95 @@
+# 多相机多模型串行配置；运行命令：python tools/camera/multi_camera_detect.py
+# 日常只需要在 pipelines 里写 camera: orbbec_335l / orbbec_305，然后给该相机挂模型。
+
+camera_aliases:            # 相机别名；业务 pipeline 里只引用别名，不写 serial
+  orbbec_335l:
+    source: orbbec
+    width: 960
+    height: 600
+    fps: 30.0
+    orbbec:
+      match_name: Gemini 335L
+  orbbec_305:
+    source: orbbec
+    width: 960
+    height: 600
+    fps: 30.0
+    orbbec:
+      match_name: Gemini 305
+
+common:                    # 所有 pipeline 的通用默认参数
+  inference:
+    imgsz: 960
+    conf: 0.6
+    iou: 0.45
+    device: "0"
+    half: true
+    infer_stride: 1
+    max_det: 20
+  visualize:
+    draw_masks: false
+    draw_boxes: true
+    draw_boxes_when_no_mask: true
+    draw_labels: true
+    draw_centers: false
+    draw_center_labels: false
+    center_mode: anchor
+    line_width: 2
+    mask_alpha: 0.35
+  display:
+    backend: opencv        # 多窗口建议用 opencv；tkinter 更适合单窗口
+    resize_to_window: false
+  output:
+    snapshot_dir: data/reports/camera_snapshots
+
+pipelines:
+  - name: base_cover_335l  # 335L 相机：Base/Cover 对位
+    camera: orbbec_335l
+    display:
+      window_title: 335L Base Cover
+    models:
+      - name: base_cover
+        path: data/models/Base_Cover.pt
+        task: auto
+        conf: 0.6
+        imgsz: 960
+        max_det: 3
+        infer_stride: 1
+    postprocess:
+      enabled: true
+      module: runtime.postprocess_plugins.base_cover_alignment
+      function: process
+      params:
+        base_class: Base
+        cover_class: Cover
+        center_depth_window: 15
+        anchors:
+          Cover: {rx: 0.56, ry: 0.48}
+          Base: {rx: 0.50, ry: 0.53}
+        base_lock:
+          stable_frames: 5
+          stable_threshold_px: 5
+          conf_threshold: 0.5
+          enable_manual_reset: true
+        auto_relock:
+          enabled: true
+          protection_margin_ratio: 0.15
+          move_threshold_px: 20
+          stable_frames: 5
+          stable_threshold_px: 5
+          max_bbox_change_ratio: 0.20
+          cooldown_frames: 45
+          message_frames: 45
+          conf_threshold: 0.5
+
+  - name: reserved_305     # 305 相机：后续把模型路径改好并 enabled: true 即可
+    enabled: false
+    camera: orbbec_305
+    display:
+      window_title: 305 Reserved
+    models:
+      - name: replace_me
+        path: data/models/replace_me.pt
+        task: auto
+        conf: 0.5
+        imgsz: 640
