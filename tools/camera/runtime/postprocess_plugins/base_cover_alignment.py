@@ -16,8 +16,13 @@ ALIGN_COVER = "ALIGN_COVER"
 class LockState:
     state: str = WAIT_BASE
     locked_base_center: dict[str, Any] | None = None
+    locked_base_box: list[float] | None = None
     base_stable_count: int = 0
     base_center_history: list[dict[str, Any]] = field(default_factory=list)
+    relock_candidate_history: list[dict[str, Any]] = field(default_factory=list)
+    relock_cooldown_remaining: int = 0
+    relock_message_frames: int = 0
+    relock_blocked_by_cover: bool = False
 
 
 _STATE = LockState()
@@ -27,8 +32,13 @@ _WARNED: set[str] = set()
 def reset() -> None:
     _STATE.state = WAIT_BASE
     _STATE.locked_base_center = None
+    _STATE.locked_base_box = None
     _STATE.base_stable_count = 0
     _STATE.base_center_history.clear()
+    _STATE.relock_candidate_history.clear()
+    _STATE.relock_cooldown_remaining = 0
+    _STATE.relock_message_frames = 0
+    _STATE.relock_blocked_by_cover = False
     _WARNED.clear()
 
 
@@ -136,6 +146,52 @@ def update_anchor_center(detection: dict[str, Any], depth_image: Any, params: di
     return "anchor"
 
 
+def detection_box(detection: dict[str, Any] | None) -> list[float] | None:
+    if detection is None:
+        return None
+    box = detection.get("box_xyxy")
+    if not box or len(box) != 4:
+        return None
+    x1, y1, x2, y2 = [float(value) for value in box]
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
+def box_size(box: list[float] | None) -> tuple[float, float] | None:
+    if box is None:
+        return None
+    return float(box[2] - box[0]), float(box[3] - box[1])
+
+
+def expand_box(box: list[float], margin_ratio: float) -> list[float]:
+    width, height = box_size(box) or (0.0, 0.0)
+    margin_x = width * max(0.0, float(margin_ratio))
+    margin_y = height * max(0.0, float(margin_ratio))
+    return [box[0] - margin_x, box[1] - margin_y, box[2] + margin_x, box[3] + margin_y]
+
+
+def boxes_intersect(a: list[float] | None, b: list[float] | None) -> bool:
+    if a is None or b is None:
+        return False
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+def box_size_change_ok(live_box: list[float] | None, locked_box: list[float] | None, max_change_ratio: float) -> bool:
+    live_size = box_size(live_box)
+    locked_size = box_size(locked_box)
+    if live_size is None or locked_size is None:
+        return False
+    live_w, live_h = live_size
+    locked_w, locked_h = locked_size
+    if locked_w <= 0 or locked_h <= 0:
+        return False
+    return (
+        abs(live_w - locked_w) / locked_w <= max_change_ratio
+        and abs(live_h - locked_h) / locked_h <= max_change_ratio
+    )
+
+
 def best_detection(detections: list[dict[str, Any]], class_name: str) -> dict[str, Any] | None:
     candidates = [detection for detection in detections if is_class(detection, class_name)]
     if not candidates:
@@ -155,6 +211,7 @@ def center_dict(detection: dict[str, Any] | None) -> dict[str, Any] | None:
         "depth_mm": center.get("depth_mm"),
         "confidence": detection_conf(detection),
         "source": center.get("source", detection.get("center_source")),
+        "box_xyxy": detection_box(detection),
     }
 
 
@@ -183,6 +240,94 @@ def lock_center_from_history(history: list[dict[str, Any]]) -> dict[str, Any]:
     return locked
 
 
+def lock_box_from_history(history: list[dict[str, Any]]) -> list[float] | None:
+    boxes = [item.get("box_xyxy") for item in history if item.get("box_xyxy") is not None]
+    if not boxes:
+        return None
+    return [sum(float(box[index]) for box in boxes) / len(boxes) for index in range(4)]
+
+
+def apply_base_lock(history: list[dict[str, Any]], source: str) -> None:
+    _STATE.locked_base_center = lock_center_from_history(history)
+    _STATE.locked_base_center["source"] = source
+    _STATE.locked_base_box = lock_box_from_history(history)
+    _STATE.base_center_history = list(history)
+    _STATE.base_stable_count = len(history)
+    _STATE.relock_candidate_history.clear()
+
+
+def tick_relock_timers() -> None:
+    if _STATE.relock_cooldown_remaining > 0:
+        _STATE.relock_cooldown_remaining -= 1
+    if _STATE.relock_message_frames > 0:
+        _STATE.relock_message_frames -= 1
+
+
+def cover_in_base_protection(cover_detection: dict[str, Any] | None, params: dict[str, Any]) -> bool:
+    locked_box = _STATE.locked_base_box
+    cover_box = detection_box(cover_detection)
+    if locked_box is None or cover_box is None:
+        return False
+    auto_params = params.get("auto_relock", {}) or {}
+    margin_ratio = float(auto_params.get("protection_margin_ratio", 0.15))
+    return boxes_intersect(cover_box, expand_box(locked_box, margin_ratio))
+
+
+def update_live_base_tracker(base_detection: dict[str, Any] | None, cover_detection: dict[str, Any] | None, params: dict[str, Any]) -> None:
+    auto_params = params.get("auto_relock", {}) or {}
+    if not bool(auto_params.get("enabled", True)):
+        return
+    if _STATE.locked_base_center is None:
+        return
+
+    tick_relock_timers()
+    _STATE.relock_blocked_by_cover = cover_in_base_protection(cover_detection, params)
+    if _STATE.relock_blocked_by_cover:
+        _STATE.relock_candidate_history.clear()
+        return
+    if _STATE.relock_cooldown_remaining > 0:
+        _STATE.relock_candidate_history.clear()
+        return
+
+    base_center = center_dict(base_detection)
+    if base_center is None:
+        _STATE.relock_candidate_history.clear()
+        return
+    conf_threshold = float(auto_params.get("conf_threshold", params.get("base_lock", {}).get("conf_threshold", 0.5)))
+    if base_center.get("confidence", 0.0) < conf_threshold:
+        _STATE.relock_candidate_history.clear()
+        return
+
+    live_box = base_center.get("box_xyxy")
+    max_box_change_ratio = float(auto_params.get("max_bbox_change_ratio", 0.20))
+    if not box_size_change_ok(live_box, _STATE.locked_base_box, max_box_change_ratio):
+        _STATE.relock_candidate_history.clear()
+        return
+
+    move_threshold_px = float(auto_params.get("move_threshold_px", 20.0))
+    distance = hypot(
+        float(base_center["x"]) - float(_STATE.locked_base_center["x"]),
+        float(base_center["y"]) - float(_STATE.locked_base_center["y"]),
+    )
+    if distance < move_threshold_px:
+        _STATE.relock_candidate_history.clear()
+        return
+
+    stable_frames = max(1, int(auto_params.get("stable_frames", 5)))
+    stable_threshold_px = float(auto_params.get("stable_threshold_px", params.get("base_lock", {}).get("stable_threshold_px", 5.0)))
+    _STATE.relock_candidate_history.append(base_center)
+    _STATE.relock_candidate_history = _STATE.relock_candidate_history[-stable_frames:]
+    if not history_is_stable(_STATE.relock_candidate_history, stable_threshold_px):
+        _STATE.relock_candidate_history = [base_center]
+        return
+    if len(_STATE.relock_candidate_history) < stable_frames:
+        return
+
+    apply_base_lock(_STATE.relock_candidate_history, "auto_relocked_base")
+    _STATE.relock_cooldown_remaining = max(0, int(auto_params.get("cooldown_frames", 45)))
+    _STATE.relock_message_frames = max(1, int(auto_params.get("message_frames", 45)))
+
+
 def update_base_lock(base_detection: dict[str, Any] | None, cover_detection: dict[str, Any] | None, params: dict[str, Any]) -> None:
     lock_params = params.get("base_lock", {}) or {}
     stable_frames = max(1, int(lock_params.get("stable_frames", 5)))
@@ -205,12 +350,13 @@ def update_base_lock(base_detection: dict[str, Any] | None, cover_detection: dic
             _STATE.base_stable_count = 1
 
         if _STATE.base_stable_count >= stable_frames:
-            _STATE.locked_base_center = lock_center_from_history(_STATE.base_center_history)
+            apply_base_lock(_STATE.base_center_history, "locked_base")
             _STATE.state = BASE_LOCKED
 
     if _STATE.state in {BASE_LOCKED, ALIGN_COVER} and _STATE.locked_base_center is not None:
         if cover_detection is not None and center_dict(cover_detection) is not None:
             _STATE.state = ALIGN_COVER
+        update_live_base_tracker(base_detection, cover_detection, params)
 
 
 def add_point_overlay(overlays: list[dict[str, Any]], center: dict[str, Any] | None, label: str, color: list[int]) -> None:
@@ -277,6 +423,8 @@ def process(detections: list[dict[str, Any]], frame: Any, depth_image: Any, para
         f"State: {_STATE.state}",
         "base target: LOCKED" if locked_base_center is not None else "base target: WAITING",
     ]
+    if _STATE.relock_message_frames > 0:
+        status_lines.append("Base moved, auto relocked")
     if _STATE.state == WAIT_BASE:
         status_lines.append(f"base stable: {_STATE.base_stable_count}/{int(params.get('base_lock', {}).get('stable_frames', 5))}")
     if dx is not None and dy is not None:

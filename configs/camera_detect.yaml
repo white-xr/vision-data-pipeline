@@ -39,6 +39,16 @@ postprocess:               # 后处理配置；业务逻辑放在插件里，不
       stable_threshold_px: 5  # 稳定阈值；中心点波动小于该像素距离才计为稳定
       conf_threshold: 0.5  # Base 锁定所需最低置信度
       enable_manual_reset: true  # 是否允许按 R 手动重置锁定状态
+    auto_relock:           # 自动重锁辅助；装配动作中锁死，空闲时才允许修复 Base 位移
+      enabled: true        # 是否启用后台 Base 位移检测；R 手动重置始终优先
+      protection_margin_ratio: 0.15  # Base 保护区外扩比例；Cover 进入该区域时禁止自动重锁
+      move_threshold_px: 20  # Base 相对锁定点位移超过该像素距离才进入重锁候选
+      stable_frames: 5     # 位移后的 Base 连续稳定帧数；达到后自动重锁
+      stable_threshold_px: 5  # 重锁候选稳定阈值；中心波动小于该值才认为稳定
+      max_bbox_change_ratio: 0.20  # bbox 宽高变化上限；超过 20% 视为遮挡/误检，不重锁
+      cooldown_frames: 45  # 自动重锁后的冷却帧数；防止抖动反复跳
+      message_frames: 45   # 自动重锁成功提示显示帧数
+      conf_threshold: 0.5  # 自动重锁候选 Base 最低置信度
 
 display:                   # 显示窗口配置
   backend: tkinter         # 显示后端；tkinter 兼容性好，opencv 依赖 GUI 版 OpenCV
