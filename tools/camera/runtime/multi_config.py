@@ -47,6 +47,7 @@ class ModelRuntimeConfig:
     name: str
     model: dict[str, Any]
     inference: dict[str, Any]
+    visualize: dict[str, Any]
 
 
 @dataclass
@@ -159,7 +160,6 @@ def normalize_model_item(raw_model: dict[str, Any], base_model: dict[str, Any], 
     model_name = str(block.pop("name", block.get("path", block.get("model", "model"))))
     block.pop("enabled", None)
     block.pop("postprocess", None)
-    block.pop("visualize", None)
     block.pop("display", None)
     block.pop("output", None)
     if "path" in block and "model" not in block:
@@ -170,7 +170,18 @@ def normalize_model_item(raw_model: dict[str, Any], base_model: dict[str, Any], 
     normalized = normalize_profile_block(block)
     model_config = deep_merge(base_model, normalized.get("model", {}))
     inference_config = deep_merge(base_inference, normalized.get("inference", {}))
-    return ModelRuntimeConfig(name=model_name, model=model_config, inference=inference_config)
+    visualize_config = normalized.get("visualize", {}) or {}
+    if not isinstance(visualize_config, dict):
+        raise SystemExit(f"[ERROR] model {model_name!r}: visualize must be a mapping.")
+    model_task = str(model_config.get("task", "auto") or "auto").strip().lower()
+    if model_task in {"seg", "segment", "segmentation"}:
+        visualize_config.setdefault("draw_masks", True)
+    return ModelRuntimeConfig(
+        name=model_name,
+        model=model_config,
+        inference=inference_config,
+        visualize=visualize_config,
+    )
 
 
 def pipeline_postprocess_config(raw_pipeline: dict[str, Any], base_postprocess: dict[str, Any]) -> dict[str, Any]:

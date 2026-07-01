@@ -266,7 +266,7 @@ python tools/camera/multi_camera_detect.py --dry-run
 python tools/camera/multi_camera_detect.py
 ```
 
-默认配置文件是 `configs/camera_pipelines.yaml`。pipeline 里用 `camera: orbbec_335l` 或 `camera: orbbec_305` 绑定相机别名，模型写在该 pipeline 的 `models` 列表里，同一相机内多个模型会按顺序串行推理。只运行某个 pipeline：
+默认配置文件是 `configs/camera_pipelines.yaml`。pipeline 里用 `camera: orbbec_335l` 或 `camera: orbbec_305` 绑定相机别名，模型写在该 pipeline 的 `models` 列表里，同一相机内多个模型会按顺序串行推理。每个模型都可以单独写 `task: detect` 或 `task: segment`；分割模型可在该模型项里写 `draw_masks: true`，不会影响其它检测模型。只运行某个 pipeline：
 
 ```bash
 python tools/camera/multi_camera_detect.py --pipeline base_cover_335l

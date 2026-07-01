@@ -29,6 +29,7 @@ class SerialModelRunner:
     name: str
     runner: YoloRunner
     infer_stride: int
+    visualize: dict[str, Any]
     last_detections: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -60,7 +61,12 @@ def make_model_runner(model_config: ModelRuntimeConfig, project_root: Path, prev
     if not preview_only:
         runner.load()
     infer_stride = max(1, int(model_config.inference.get("infer_stride", 1)))
-    return SerialModelRunner(name=model_config.name, runner=runner, infer_stride=infer_stride)
+    return SerialModelRunner(
+        name=model_config.name,
+        runner=runner,
+        infer_stride=infer_stride,
+        visualize=model_config.visualize,
+    )
 
 
 def dry_run(config: MultiRuntimeConfig) -> None:
@@ -79,6 +85,7 @@ def dry_run(config: MultiRuntimeConfig) -> None:
             print(
                 "[OK]   Model: "
                 f"{model.name}, path={runner.model_path}, "
+                f"task={model.model.get('task', 'auto')}, "
                 f"imgsz={model.inference.get('imgsz')}, conf={model.inference.get('conf')}, "
                 f"infer_stride={model.inference.get('infer_stride')}"
             )
@@ -129,6 +136,9 @@ def run_serial_models(
             for detection in detections:
                 detection["model_name"] = model.name
                 detection["pipeline_name"] = runtime.config.name
+                detection["model_task"] = model.runner.task
+                if model.visualize:
+                    detection["visualize"] = model.visualize
             model.last_detections = detections
         merged.extend(model.last_detections)
     return merged

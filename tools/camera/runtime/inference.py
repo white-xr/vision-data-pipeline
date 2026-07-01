@@ -57,12 +57,23 @@ def detection_center(binary_mask: Any, box_xyxy: list[float], center_mode: str) 
     return center_x, center_y, "box"
 
 
+def normalize_yolo_task(value: Any) -> str:
+    task = str(value or "auto").strip().lower()
+    aliases = {
+        "seg": "segment",
+        "segmentation": "segment",
+        "detection": "detect",
+    }
+    return aliases.get(task, task)
+
+
 class YoloRunner:
     def __init__(self, model_config: dict[str, Any], inference_config: dict[str, Any], project_root: Path) -> None:
         self.model_config = model_config
         self.inference_config = inference_config
         self.project_root = project_root
         self.model_path = self.resolve_model_path(model_config.get("path"))
+        self.task = normalize_yolo_task(model_config.get("task", "auto"))
         self.class_names = load_class_names(model_config.get("class_names"), project_root)
         self.model = None
 
@@ -87,7 +98,11 @@ class YoloRunner:
                 "[ERROR] Missing dependency: ultralytics. "
                 "Activate the vision-data environment and install dependencies first."
             ) from exc
-        self.model = YOLO(str(self.model_path))
+        if self.task in {"", "auto"}:
+            self.model = YOLO(str(self.model_path))
+            self.task = str(getattr(self.model, "task", "auto") or "auto")
+        else:
+            self.model = YOLO(str(self.model_path), task=self.task)
 
     def predict(self, frame: Any):
         if self.model is None:

@@ -104,28 +104,41 @@ def draw_center_marker(
         )
 
 
+def detection_visualize_config(default_config: dict[str, Any], detection: dict[str, Any]) -> dict[str, Any]:
+    model_config = detection.get("visualize")
+    if not isinstance(model_config, dict):
+        return default_config
+    merged = dict(default_config)
+    merged.update(model_config)
+    return merged
+
+
 def draw_detections(image: Any, detections: list[dict[str, Any]], visualize_config: dict[str, Any]):
     annotated = image.copy()
-    mask_alpha = float(visualize_config.get("mask_alpha", 0.35))
-
-    if visualize_config.get("draw_masks", True):
-        for detection in detections:
-            mask = detection.get("mask")
-            if mask is None:
-                continue
-            color = instance_color(detection.get("class_id"))
-            colored = annotated.copy()
-            colored[mask > 0] = color
-            annotated = cv2.addWeighted(colored, mask_alpha, annotated, 1.0 - mask_alpha, 0)
-
-    line_width = normalize_line_width(visualize_config.get("line_width", 2))
-    draw_boxes = bool(visualize_config.get("draw_boxes", True))
-    draw_boxes_when_no_mask = bool(visualize_config.get("draw_boxes_when_no_mask", True))
-    draw_labels = bool(visualize_config.get("draw_labels", True))
-    draw_centers = bool(visualize_config.get("draw_centers", True))
-    draw_center_labels = bool(visualize_config.get("draw_center_labels", True))
 
     for detection in detections:
+        visual = detection_visualize_config(visualize_config, detection)
+        if not visual.get("draw_masks", True):
+            continue
+        mask = detection.get("mask")
+        if mask is None:
+            continue
+        mask_alpha = float(visual.get("mask_alpha", 0.35))
+        color = instance_color(detection.get("class_id"))
+        colored = annotated.copy()
+        colored[mask > 0] = color
+        annotated = cv2.addWeighted(colored, mask_alpha, annotated, 1.0 - mask_alpha, 0)
+
+    default_line_width = normalize_line_width(visualize_config.get("line_width", 2))
+
+    for detection in detections:
+        visual = detection_visualize_config(visualize_config, detection)
+        line_width = normalize_line_width(visual.get("line_width", default_line_width))
+        draw_boxes = bool(visual.get("draw_boxes", True))
+        draw_boxes_when_no_mask = bool(visual.get("draw_boxes_when_no_mask", True))
+        draw_labels = bool(visual.get("draw_labels", True))
+        draw_centers = bool(visual.get("draw_centers", True))
+        draw_center_labels = bool(visual.get("draw_center_labels", True))
         box = detection.get("box_xyxy")
         mask = detection.get("mask")
         color = instance_color(detection.get("class_id"))

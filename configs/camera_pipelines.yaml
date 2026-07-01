@@ -51,14 +51,19 @@ pipelines:
     camera: orbbec_335l
     display:
       window_title: 335L Base Cover
-    models:
+    models:                 # 模型按从上到下串行运行；task 写 detect/segment/auto
       - name: base_cover
         path: data/models/Base_Cover.pt
-        task: auto
+        task: detect
         conf: 0.6
         imgsz: 960
         max_det: 3
         infer_stride: 1
+      - name: hole
+        path: data/models/hole.pt
+        task: detect
+        conf: 0.5
+        imgsz: 640
     postprocess:
       enabled: true
       module: runtime.postprocess_plugins.base_cover_alignment
@@ -91,14 +96,15 @@ pipelines:
     camera: orbbec_305
     display:
       window_title: 305 Reserved
-    models:                 # 多个模型按从上到下的顺序串行运行
+    models:                 # 多个模型按从上到下串行运行；segment 模型可单独 draw_masks
       - name: hole
         path: data/models/hole.pt
-        task: auto
+        task: detect
         conf: 0.5
         imgsz: 640
       - name: triangle_metal
         path: data/models/triangle-metal.pt
-        task: auto
+        task: segment
+        draw_masks: true
         conf: 0.5
         imgsz: 640
