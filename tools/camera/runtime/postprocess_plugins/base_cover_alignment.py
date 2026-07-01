@@ -177,6 +177,14 @@ def boxes_intersect(a: list[float] | None, b: list[float] | None) -> bool:
     return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
 
 
+def point_in_box(point: dict[str, Any] | None, box: list[float] | None) -> bool:
+    if point is None or box is None:
+        return False
+    x = float(point["x"])
+    y = float(point["y"])
+    return float(box[0]) <= x <= float(box[2]) and float(box[1]) <= y <= float(box[3])
+
+
 def box_size_change_ok(live_box: list[float] | None, locked_box: list[float] | None, max_change_ratio: float) -> bool:
     live_size = box_size(live_box)
     locked_size = box_size(locked_box)
@@ -265,12 +273,15 @@ def tick_relock_timers() -> None:
 
 def cover_in_base_protection(cover_detection: dict[str, Any] | None, params: dict[str, Any]) -> bool:
     locked_box = _STATE.locked_base_box
-    cover_box = detection_box(cover_detection)
-    if locked_box is None or cover_box is None:
+    if locked_box is None or cover_detection is None:
         return False
     auto_params = params.get("auto_relock", {}) or {}
     margin_ratio = float(auto_params.get("protection_margin_ratio", 0.15))
-    return boxes_intersect(cover_box, expand_box(locked_box, margin_ratio))
+    protection_box = expand_box(locked_box, margin_ratio)
+    block_mode = str(auto_params.get("cover_block_mode", "center")).strip().lower()
+    if block_mode in {"bbox", "box", "intersect"}:
+        return boxes_intersect(detection_box(cover_detection), protection_box)
+    return point_in_box(center_dict(cover_detection), protection_box)
 
 
 def update_live_base_tracker(base_detection: dict[str, Any] | None, cover_detection: dict[str, Any] | None, params: dict[str, Any]) -> None:
@@ -356,6 +367,8 @@ def update_base_lock(base_detection: dict[str, Any] | None, cover_detection: dic
     if _STATE.state in {BASE_LOCKED, ALIGN_COVER} and _STATE.locked_base_center is not None:
         if cover_detection is not None and center_dict(cover_detection) is not None:
             _STATE.state = ALIGN_COVER
+        else:
+            _STATE.state = BASE_LOCKED
         update_live_base_tracker(base_detection, cover_detection, params)
 
 

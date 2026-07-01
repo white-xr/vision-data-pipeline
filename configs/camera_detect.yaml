@@ -45,10 +45,11 @@ postprocess:               # 后处理配置；业务逻辑放在插件里，不
     auto_relock:           # 自动重锁辅助；装配动作中锁死，空闲时才允许修复 Base 位移
       enabled: true        # 是否启用后台 Base 位移检测；R 手动重置始终优先
       protection_margin_ratio: 0.15  # Base 保护区外扩比例；Cover 进入该区域时禁止自动重锁
+      cover_block_mode: center  # 保护区判断方式；center=Cover 中心进保护区才阻止重锁，bbox=旧的框相交判断
       move_threshold_px: 20  # Base 相对锁定点位移超过该像素距离才进入重锁候选
-      stable_frames: 5     # 位移后的 Base 连续稳定帧数；达到后自动重锁
-      stable_threshold_px: 5  # 重锁候选稳定阈值；中心波动小于该值才认为稳定
-      max_bbox_change_ratio: 0.20  # bbox 宽高变化上限；超过 20% 视为遮挡/误检，不重锁
+      stable_frames: 4     # 位移后的 Base 连续稳定帧数；达到后自动重锁
+      stable_threshold_px: 10  # 重锁候选稳定阈值；真实相机下允许少量检测抖动
+      max_bbox_change_ratio: 0.35  # bbox 宽高变化上限；放宽到 35%，避免正常移动/倾斜导致无法重锁
       cooldown_frames: 45  # 自动重锁后的冷却帧数；防止抖动反复跳
       message_frames: 45   # 自动重锁成功提示显示帧数
       conf_threshold: 0.5  # 自动重锁候选 Base 最低置信度

@@ -122,9 +122,9 @@ def run_serial_models(
     depth_for_lookup: Any,
 ) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
-    center_mode = str(runtime.config.visualize.get("center_mode", "centroid"))
     for model in runtime.models:
         if model_should_infer(model, runtime.frame_id):
+            center_mode = str(model.visualize.get("center_mode", runtime.config.visualize.get("center_mode", "centroid")))
             result = model.runner.predict(frame)
             detections = detections_from_result(
                 result,

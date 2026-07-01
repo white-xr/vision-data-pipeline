@@ -62,6 +62,9 @@ pipelines:
       - name: hole
         path: data/models/hole.pt
         task: detect
+        center_mode: box        # hole 中心点用 bbox 几何中心
+        draw_centers: true      # 显示 hole 的 bbox 中心点
+        draw_center_labels: false  # 只画中心点，不显示坐标文字
         conf: 0.5
         imgsz: 640
     postprocess:
@@ -83,13 +86,14 @@ pipelines:
         auto_relock:
           enabled: true
           protection_margin_ratio: 0.15
-          move_threshold_px: 20
-          stable_frames: 5
-          stable_threshold_px: 5
-          max_bbox_change_ratio: 0.20
-          cooldown_frames: 45
-          message_frames: 45
-          conf_threshold: 0.5
+          cover_block_mode: center  # center=Cover 中心进保护区才阻止重锁，避免大 bbox 擦边一直阻止刷新
+          move_threshold_px: 20  # Base 相对锁定点移动超过 20px 才认为可能搬动了
+          stable_frames: 4       # 新 Base 连续稳定 4 帧后自动重锁
+          stable_threshold_px: 10  # 自动重锁稳定阈值；允许真实相机下的检测抖动
+          max_bbox_change_ratio: 0.35  # bbox 宽高变化上限；放宽到 35%，避免正常倾斜导致无法重锁
+          cooldown_frames: 45    # 自动重锁后的冷却帧数；防止反复跳
+          message_frames: 45     # 自动重锁成功提示显示帧数
+          conf_threshold: 0.5    # 自动重锁候选 Base 最低置信度
 
   - name: reserved_305     # 305 相机：hole + triangle-metal 串行验证
     enabled: true
@@ -100,6 +104,9 @@ pipelines:
       - name: hole
         path: data/models/hole.pt
         task: detect
+        center_mode: box        # hole 中心点用 bbox 几何中心
+        draw_centers: true      # 显示 hole 的 bbox 中心点
+        draw_center_labels: false  # 只画中心点，不显示坐标文字
         conf: 0.5
         imgsz: 640
       - name: triangle_metal
